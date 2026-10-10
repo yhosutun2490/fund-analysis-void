@@ -10,6 +10,8 @@
     "db:init:remote": "wrangler d1 execute fund_risks --remote --file=./schema.sql",
     "ingest:local": "curl -s -X POST http://localhost:8787/admin/ingest | tail -1",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepare": "husky"
   },
   "dependencies": {
@@ -21,6 +23,7 @@
     "@commitlint/config-conventional": "^21.2.3",
     "husky": "^9.1.7",
     "typescript": "^5.7.2",
+    "vitest": "^5.0.3",
     "wrangler": "^4.0.0"
   }
 }
