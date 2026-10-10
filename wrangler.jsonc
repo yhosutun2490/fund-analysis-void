@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "fund-risks-analysis",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-18",
+
+  // 每天台灣時間早上 7:00 抓一次（UTC 23:00）。風險指標月更、淨值日更，一天一次足夠。
+  "triggers": {
+    "crons": ["0 23 * * *"]
+  },
+
+  // 建立：wrangler d1 create fund_risks  → 把回傳的 database_id 填進來
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fund_risks",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+    }
+  ],
+
+  "vars": {
+    // 自用工具：抓取頻率低、僅供內部分析。詳見 docs/research/2026-10-10-anue-fund-search-api.md
+    "ANUE_PAGE_SIZE": "2000"
+  }
+}
