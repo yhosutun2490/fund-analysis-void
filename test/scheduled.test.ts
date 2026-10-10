@@ -7,6 +7,9 @@ vi.mock("../src/services/ingest", () => ({
 import { scheduled } from "../src/triggers/scheduled";
 import { runIngest } from "../src/services/ingest";
 
+const callScheduled = (ctx: ExecutionContext) =>
+  scheduled({} as ScheduledController, {} as never, ctx);
+
 describe("scheduled trigger", () => {
   it("把工作交給 runIngest 並透過 waitUntil 掛起", () => {
     const promises: Promise<unknown>[] = [];
@@ -14,7 +17,7 @@ describe("scheduled trigger", () => {
       waitUntil: (p: Promise<unknown>) => promises.push(p),
     } as unknown as ExecutionContext;
 
-    scheduled({} as ScheduledController, {} as never, ctx);
+    callScheduled(ctx);
 
     expect(runIngest).toHaveBeenCalledOnce();
     expect(promises).toHaveLength(1);
@@ -22,6 +25,6 @@ describe("scheduled trigger", () => {
 
   it("不向外丟出例外", () => {
     const ctx = { waitUntil: () => {} } as unknown as ExecutionContext;
-    expect(() => scheduled({} as ScheduledController, {} as never, ctx)).not.toThrow();
+    expect(() => callScheduled(ctx)).not.toThrow();
   });
 });
