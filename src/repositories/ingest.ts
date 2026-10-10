@@ -1,9 +1,4 @@
-import type { FundRecord } from "./anue";
-
-export interface Env {
-  DB: D1Database;
-  ANUE_PAGE_SIZE?: string;
-}
+import type { FundRecord } from "../anue";
 
 /** 把一批正規化記錄寫入 D1。funds 覆蓋更新；fund_risk 以 (fund_id, as_of) upsert 累積月歷史。 */
 export async function upsertRecords(db: D1Database, records: FundRecord[]): Promise<number> {
@@ -73,4 +68,11 @@ export async function recordRun(
     )
     .bind(run.started_at, run.finished_at, run.data_time, run.total_count, run.upserted, run.status, run.note ?? null)
     .run();
+}
+
+export async function listRuns(db: D1Database) {
+  const { results } = await db
+    .prepare("SELECT * FROM ingest_runs ORDER BY id DESC LIMIT 20")
+    .all();
+  return results;
 }
