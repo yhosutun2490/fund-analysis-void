@@ -72,10 +72,14 @@ const SCREEN_CTE = `
   SELECT f.fund_id, f.name, f.category, f.currency, f.rr, r.as_of,
          r.sharpe_3y, r.ret_3m, r.ret_6m, r.ret_1y,
          r.roi_y1, r.roi_y2, r.roi_y3, r.roi_y4, r.roi_y5,
-         r.maxdrop_y1, r.maxdrop_y2, r.maxdrop_y3, r.maxdrop_y4, r.maxdrop_y5
+         r.maxdrop_y1, r.maxdrop_y2, r.maxdrop_y3, r.maxdrop_y4, r.maxdrop_y5,
+         s.series_end AS rec_series_end, s.mdd AS rec_mdd, s.mdd_recovered AS rec_mdd_recovered,
+         s.mdd_underwater_days AS rec_mdd_underwater_days,
+         s.still_underwater_ratio AS rec_still_underwater_ratio, s.loss_prob_1y AS rec_loss_prob_1y
   FROM funds f
   JOIN latest l ON l.fund_id = f.fund_id
   JOIN fund_risk r ON r.fund_id = f.fund_id AND r.as_of = l.as_of
+  LEFT JOIN fund_series s ON s.fund_id = f.fund_id
 `;
 
 export interface ScreenFilters {

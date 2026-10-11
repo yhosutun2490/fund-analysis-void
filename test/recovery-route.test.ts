@@ -76,6 +76,20 @@ describe("GET /api/funds/:id/recovery — 錯誤處理", () => {
     expect(body.lump_sum.holding).toHaveProperty("1y");
     expect(body.window).toHaveProperty("from");
     expect(saveSeries).toHaveBeenCalledOnce();
+    // 寫入時帶全期間摘要(ticket 10)
+    const summary = vi.mocked(saveSeries).mock.calls[0][2] as any;
+    expect(typeof summary.mdd).toBe("number");
+  });
+
+  it("自訂 from/to 不改寫全期間摘要(摘要恆為整條序列)", async () => {
+    vi.mocked(getFund).mockResolvedValue({ fund_id: "B7", name: "f", currency: "USD", setup_date: "2015-01-01" } as never);
+    vi.mocked(getSeries).mockResolvedValue(null as never);
+    vi.mocked(fetchTotalReturnSeries).mockResolvedValue(series(70));
+    await req("/api/funds/B7/recovery?from=2019-01-01&to=2020-01-01");
+    const summary = vi.mocked(saveSeries).mock.calls[0][2] as any;
+    // 摘要由整條 70 點序列算出(非窗口),mdd 存在
+    expect(typeof summary.mdd).toBe("number");
+    expect(summary.mdd_recovered).not.toBeUndefined();
   });
 
   it("minDepth 不在 (0,100) → 400", async () => {

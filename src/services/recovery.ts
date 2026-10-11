@@ -1,8 +1,8 @@
 import { fetchTotalReturnSeries } from "../anuePrice";
 import type { Env } from "../env";
-import type { SeriesPoint } from "../recovery";
+import { computeLumpSum, computeMdd, type SeriesPoint } from "../recovery";
 import { getLatestRisk } from "../repositories/funds";
-import { getSeries, type SeriesRow, saveSeries } from "../repositories/series";
+import { getSeries, type SeriesRow, type SeriesSummary, saveSeries } from "../repositories/series";
 
 /** 上游無法取得且無快取可用 → 路由回 502。 */
 export class UpstreamUnavailable extends Error {}
@@ -39,10 +39,31 @@ const fromCache = (c: SeriesRow, stale: boolean, warning?: string): LoadedSeries
  * 取得含息序列：快取新鮮則直接用,否則整條重抓並存檔。
  * 上游失敗時有快取 → 回快取並標 stale;無快取 → 丟 UpstreamUnavailable（502）。
  */
+const MIN_POINTS = 60;
+
+/** 全期間（整條序列）摘要,供 /api/screen 帶出;不受請求 from/to 影響。 */
+function fullPeriodSummary(points: SeriesPoint[]): SeriesSummary {
+  if (points.length < MIN_POINTS) return {};
+  const dd = computeMdd(points);
+  const ls = computeLumpSum(points);
+  const h1 = ls.holding["1y"];
+  return {
+    mdd: dd.depth,
+    mdd_recovered: dd.recovered,
+    mdd_underwater_days: dd.underwater_days,
+    still_underwater_ratio: ls.still_underwater_ratio,
+    loss_prob_1y: "loss_prob" in h1 ? h1.loss_prob : null,
+  };
+}
+
 async function persist(db: D1Database, fundId: string, points: SeriesPoint[], fetched_at: string): Promise<LoadedSeries> {
   const start = points[0][0];
   const end = points[points.length - 1][0];
-  await saveSeries(db, { fund_id: fundId, basis: "total_return", series_start: start, series_end: end, points, fetched_at });
+  await saveSeries(
+    db,
+    { fund_id: fundId, basis: "total_return", series_start: start, series_end: end, points, fetched_at },
+    fullPeriodSummary(points),
+  );
   return { points, start, end, fetched_at, stale: false };
 }
 

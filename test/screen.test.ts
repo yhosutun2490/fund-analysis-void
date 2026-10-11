@@ -238,3 +238,35 @@ describe("screenGroup — 3.2 / 3.4 規則", () => {
     expect(ids).toEqual(["Q", "R", "P"]);
   });
 });
+
+describe("recovery 摘要(ticket 10)", () => {
+  const strong = (id: string, o: Partial<ScreenRow> = {}) =>
+    complete(id, { sharpe_3y: 9, roi_y1: 99, roi_y2: 99, roi_y3: 99, roi_y4: 99, roi_y5: 99, maxdrop_y1: -1, maxdrop_y2: -1, maxdrop_y3: -1, maxdrop_y4: -1, maxdrop_y5: -1, ...o });
+  const base = () => [complete("A", {}), complete("B", {}), complete("C", {}), complete("D", {})];
+
+  it("已分析(有 fund_series 摘要)→ recovery 物件", () => {
+    const T = strong("T", {
+      rec_series_end: "2026-10-09",
+      rec_mdd: -0.31,
+      rec_mdd_recovered: 1,
+      rec_mdd_underwater_days: 610,
+      rec_still_underwater_ratio: 0.12,
+      rec_loss_prob_1y: 0.28,
+    });
+    const g = screenGroup([...base(), T], PARAMS);
+    const t = g.passed.find((x) => x.fund_id === "T");
+    expect(t?.recovery).toEqual({
+      mdd: -0.31,
+      mdd_recovered: true,
+      mdd_underwater_days: 610,
+      still_underwater_ratio: 0.12,
+      loss_prob_1y: 0.28,
+      series_end: "2026-10-09",
+    });
+  });
+
+  it("未分析 → recovery null", () => {
+    const g = screenGroup([...base(), strong("T", {})], PARAMS);
+    expect(g.passed.find((x) => x.fund_id === "T")?.recovery).toBeNull();
+  });
+});

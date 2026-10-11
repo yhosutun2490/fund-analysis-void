@@ -23,6 +23,22 @@ export interface ScreenRow {
   ret_3m: number | null;
   ret_6m: number | null;
   ret_1y: number | null;
+  // fund_series 全期間摘要（left join;未分析為 null）
+  rec_series_end?: string | null;
+  rec_mdd?: number | null;
+  rec_mdd_recovered?: number | null;
+  rec_mdd_underwater_days?: number | null;
+  rec_still_underwater_ratio?: number | null;
+  rec_loss_prob_1y?: number | null;
+}
+
+export interface RecoverySummary {
+  mdd: number | null;
+  mdd_recovered: boolean | null;
+  mdd_underwater_days: number | null;
+  still_underwater_ratio: number | null;
+  loss_prob_1y: number | null;
+  series_end: string;
 }
 
 export type Window = "3m" | "6m" | "1y";
@@ -54,6 +70,7 @@ export interface PassedFund {
   ladder: Ladder;
   weak_flag: boolean | null;
   reasons: string[];
+  recovery: RecoverySummary | null; // 已分析過 → 全期間摘要,否則 null
 }
 
 export interface InsufficientFund {
@@ -214,6 +231,7 @@ export function screenGroup(rows: ScreenRow[], params: ScreenParams, matchedIds?
       ladder,
       weak_flag,
       reasons,
+      recovery: recoveryOf(r),
     });
   }
 
@@ -221,6 +239,19 @@ export function screenGroup(rows: ScreenRow[], params: ScreenParams, matchedIds?
   passed.sort((a, b) => (b.sharpe_pct! - a.sharpe_pct!) || (b.worst_drop_pct! - a.worst_drop_pct!));
 
   return { category, currency, peer_count, matched_count, passed, rejected_count, insufficient };
+}
+
+/** 由 left join 的 fund_series 摘要欄建 recovery 物件;未分析（無 series_end）→ null。 */
+function recoveryOf(r: ScreenRow): RecoverySummary | null {
+  if (!r.rec_series_end) return null;
+  return {
+    mdd: r.rec_mdd ?? null,
+    mdd_recovered: r.rec_mdd_recovered == null ? null : r.rec_mdd_recovered !== 0,
+    mdd_underwater_days: r.rec_mdd_underwater_days ?? null,
+    still_underwater_ratio: r.rec_still_underwater_ratio ?? null,
+    loss_prob_1y: r.rec_loss_prob_1y ?? null,
+    series_end: r.rec_series_end,
+  };
 }
 
 const labelOf = (w: Window) => ({ "3m": "3M", "6m": "6M", "1y": "1Y" })[w];
