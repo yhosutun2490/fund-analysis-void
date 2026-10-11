@@ -59,7 +59,7 @@ funds.get("/:id/recovery", async (c) => {
 
   let data;
   try {
-    data = await loadSeries(c.env, fund);
+    data = await loadSeries(c.env, fund, { refresh: q.refresh === "true" });
   } catch (e) {
     if (e instanceof UpstreamUnavailable) return c.json({ error: `上游無法取得且無快取: ${e.message}` }, 502);
     throw e;
