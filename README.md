@@ -36,6 +36,10 @@ npx wrangler d1 create fund_risks
 npm run db:init            # 本地
 npm run db:init:remote     # 線上
 
+# 既有 DB 升級（新欄位 ret_3m/ret_6m）；全新建庫不需要
+npm run db:migrate         # 本地
+npm run db:migrate:remote  # 線上
+
 # 3. 本地開發
 npm run dev
 curl -X POST http://localhost:8787/admin/ingest   # 手動抓一次
@@ -50,7 +54,7 @@ npm run deploy
 | --- | --- | --- |
 | POST | `/admin/ingest` | 手動觸發抓取（與 cron 同流程） |
 | GET | `/api/funds` | 清單；query：`group` `category` `currency` `rr` `domicile` `minSharpe3y` `maxStd1y` `sort`(sharpe_3y/std_1y/ret_3y/aum_twd) `order` `limit` `offset` |
-| GET | `/api/funds/:id` | 單檔基本資料 + 最新快照 |
+| GET | `/api/funds/:id` | 單檔基本資料 + 最新快照（含近 3 個月 `ret_3m`、6 個月 `ret_6m` 報酬） |
 | GET | `/api/funds/:id/history` | 風險指標月歷史（cron 累積） |
 | GET | `/api/analyze` | 同類相對分析；query：`category`(必填) `currency` `wSharpe` `wStd` `wMaxdrop` `limit` |
 | GET | `/api/meta/categories` | 基金組別清單與檔數 |
@@ -60,6 +64,7 @@ npm run deploy
 
 - 夏普 `sharpe_*` 為**月報酬口徑、未年化**，勿與其他網站的年化夏普比較。
 - `std_1y` 僅 1 年；`maxdrop_y1..5` 為各年度最大跌幅（粗略 MDD，非真正回撤）。
-- 風險指標 `as_of`：境內用指標截止日（月更），境外回退月底基準日——**同一表內 as_of 可能跨月份**，嚴格同期比較時需自行對齊。
+- 風險指標 `as_of`：境內用指標截止日（月更），境外回退月底基準日——**同一表內 as_of 可能跨月份**，嚴格同期比較時需自行對齊。日期若為鉅亨的 `1900-` 哨兵值則存 null。
+- `ret_3m`／`ret_6m`（`perF_3MMEJ`／`perF_6MMEJ`）為近 3／6 個月報酬，**月底基準**，與 `ret_1y..5y` 同口徑。
 - **Beta 本資料源沒有**，需日後自公開 NAV + 指定基準回歸自算（見 spec 第 5 節）。
 - `analyze` 的 `score` 只在同 `category` 組內有意義，是相對穩健度，不是買賣建議。

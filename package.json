@@ -8,6 +8,8 @@
     "deploy": "wrangler deploy",
     "db:init": "wrangler d1 execute fund_risks --local --file=./schema.sql",
     "db:init:remote": "wrangler d1 execute fund_risks --remote --file=./schema.sql",
+    "db:migrate": "wrangler d1 execute fund_risks --local --file=./migrations/0001_add_ret_3m_6m.sql",
+    "db:migrate:remote": "wrangler d1 execute fund_risks --remote --file=./migrations/0001_add_ret_3m_6m.sql",
     "ingest:local": "curl -s -X POST http://localhost:8787/admin/ingest | tail -1",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS fund_risk (
   sharpe_3y    REAL,
   sharpe_5y    REAL,
   sharpe_10y   REAL,
+  ret_3m       REAL,              -- perF_3MMEJ 近3個月報酬(%)，月底基準
+  ret_6m       REAL,              -- perF_6MMEJ 近6個月報酬(%)，月底基準
   ret_1y       REAL,              -- perF_1YMEJ (%)
   ret_3y       REAL,              -- perF_3YMEJ (%)
   ret_5y       REAL,              -- perF_5YMEJ (%)

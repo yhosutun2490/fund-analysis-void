@@ -8,6 +8,10 @@ const NA = -99999999.9999; // 哨兵值 = 無資料
 export const num = (v: number | null | undefined): number | null =>
   v == null || v <= NA + 1 ? null : v;
 
+/** 日期哨兵值處理：空值或以 1900- 開頭(鉅亨的假日期)→ null。 */
+export const cleanDate = (d: string | null | undefined): string | null =>
+  d && !d.startsWith("1900-") ? d : null;
+
 export interface AnueRow {
   fundID: string;
   isinCode: string | null;
@@ -31,6 +35,8 @@ export interface AnueRow {
   sharpE_RATIO_3YMEJ: number | null;
   sharpE_RATIO_5YMEJ: number | null;
   sharpE_RATIO_10YMEJ: number | null;
+  perF_3MMEJ: number | null;
+  perF_6MMEJ: number | null;
   perF_1YMEJ: number | null;
   perF_3YMEJ: number | null;
   perF_5YMEJ: number | null;
@@ -110,6 +116,8 @@ export interface FundRecord {
     sharpe_3y: number | null;
     sharpe_5y: number | null;
     sharpe_10y: number | null;
+    ret_3m: number | null;
+    ret_6m: number | null;
     ret_1y: number | null;
     ret_3y: number | null;
     ret_5y: number | null;
@@ -149,12 +157,15 @@ export function normalize(r: AnueRow): FundRecord {
     },
     risk: {
       // 境內用 dataTime（指標截止日，月更）；境外該欄為空，回退到月底基準日/淨值日
-      as_of: r.dataTime || r.perF_IMEJDate || r.navDate || null,
+      // 1900- 開頭為鉅亨哨兵值，逐一清掉後取第一個有效日期
+      as_of: cleanDate(r.dataTime) || cleanDate(r.perF_IMEJDate) || cleanDate(r.navDate) || null,
       std_1y: num(r.standarD_DEVIATION_1YMEJ),
       sharpe_1y: num(r.sharpE_RATIO_1YMEJ),
       sharpe_3y: num(r.sharpE_RATIO_3YMEJ),
       sharpe_5y: num(r.sharpE_RATIO_5YMEJ),
       sharpe_10y: num(r.sharpE_RATIO_10YMEJ),
+      ret_3m: num(r.perF_3MMEJ),
+      ret_6m: num(r.perF_6MMEJ),
       ret_1y: num(r.perF_1YMEJ),
       ret_3y: num(r.perF_3YMEJ),
       ret_5y: num(r.perF_5YMEJ),
@@ -170,7 +181,7 @@ export function normalize(r: AnueRow): FundRecord {
       maxdrop_y5: num(r.year_MaxQuoteChange5),
       lipper_total: lt,
       nav: num(r.nav),
-      nav_date: r.navDate || null,
+      nav_date: cleanDate(r.navDate),
     },
   };
 }
