@@ -2,7 +2,11 @@
 // 口徑/來源註解見各欄位;資料帶 lipperid（理柏授權）,僅供內部分析。
 import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-// 基金基本資料（每檔一列,每次抓取覆蓋更新）
+/**
+ * 基金基本資料。每檔基金一列,以鉅亨代碼 `fund_id` 為主鍵。
+ * 每次 ingest 覆蓋更新（不留歷史）;`investment_area` 由 InvestmentArea 篩選反查另行維護,
+ * 一般 upsert 不覆寫它。索引涵蓋常用篩選維度（組別/類別/RR/區域）。
+ */
 export const funds = sqliteTable(
   "funds",
   {
@@ -29,8 +33,12 @@ export const funds = sqliteTable(
   ],
 );
 
-// 風險指標快照（(fund_id, as_of) 為 key,每月累積一筆）
-// 口徑：*MEJ = 月底基準;夏普為「月報酬口徑、未年化」,勿與年化夏普混比
+/**
+ * 風險指標快照。以 `(fund_id, as_of)` 為複合主鍵,每月累積一筆 ——
+ * 這是鉅亨不提供、靠每日 ingest 自行累積出來的歷史序列。
+ * 口徑：`*MEJ` = 月底基準;夏普為「月報酬口徑、未年化」,勿與年化夏普混比;
+ * `roi_y*` / `maxdrop_y*` 期間口徑未驗證,僅供同組相對比較。
+ */
 export const fundRisk = sqliteTable(
   "fund_risk",
   {
@@ -64,7 +72,12 @@ export const fundRisk = sqliteTable(
   (t) => [primaryKey({ columns: [t.fundId, t.asOf] }), index("idx_risk_asof").on(t.asOf)],
 );
 
-// 含息累積報酬序列快取（一檔一列,回復分析用）
+/**
+ * 含息累積報酬序列快取。一檔一列,`points` 存全期間日指數 JSON,供 `/recovery` 回復分析。
+ * 過期時增量補抓最後一段並串接;每次寫入同時更新全期間摘要欄
+ * （`mdd` / `mdd_recovered` / `mdd_underwater_days` / `still_underwater_ratio` / `loss_prob_1y`）,
+ * 供 `/api/screen` 的 `recovery` 欄位帶出。
+ */
 export const fundSeries = sqliteTable("fund_series", {
   fundId: text("fund_id").primaryKey(),
   basis: text("basis").notNull(), // 'total_return'（含配息）
@@ -80,7 +93,10 @@ export const fundSeries = sqliteTable("fund_series", {
   lossProb1y: real("loss_prob_1y"),
 });
 
-// 每次抓取的紀錄（稽核用）
+/**
+ * 每次抓取（cron 或手動 /admin/ingest）的執行紀錄,稽核用。
+ * 自增 id;`status` 為 ok/error;`note` 記警告或錯誤（如投資區域部分失敗）。
+ */
 export const ingestRuns = sqliteTable("ingest_runs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   startedAt: text("started_at").notNull(),
