@@ -20,7 +20,7 @@ POST /admin/ingest ─┴─▶ fetchAllFunds() ─▶ normalize(哨兵值→nul
 
 - `src/anue.ts`：抓取 + 正規化（`pageSize` 2000、3 頁抓完 4540 檔；`-99999999.9999` → null）
 - `src/db.ts`：D1 upsert（`funds` 覆蓋更新、`fund_risk` 以 `(fund_id, as_of)` 累積月快照）
-- `src/analysis.ts`：同類基金組內 z-score 加權合成（描述性，非建議）
+- `src/screen.ts`：快照初篩純計算（同組百分位、年度勝率、入選規則；描述性，非建議）
 - `src/index.ts`：Hono 路由 + `scheduled` cron handler
 - `schema.sql`：D1 schema
 
@@ -56,7 +56,7 @@ npm run deploy
 | GET | `/api/funds` | 清單；query：`group` `category` `currency` `rr` `domicile` `minSharpe3y` `maxStd1y` `sort`(sharpe_3y/std_1y/ret_3y/aum_twd) `order` `limit` `offset` |
 | GET | `/api/funds/:id` | 單檔基本資料 + 最新快照（含近 3 個月 `ret_3m`、6 個月 `ret_6m` 報酬） |
 | GET | `/api/funds/:id/history` | 風險指標月歷史（cron 累積） |
-| GET | `/api/analyze` | 同類相對分析；query：`category`(必填) `currency` `wSharpe` `wStd` `wMaxdrop` `limit` |
+| GET | `/api/screen` | 快照初篩；query：`category`(必填) `currency` `minSharpePct`(50) `minDropPct`(40) `minWins`(3) `limit`(100)。依 (category,currency) 分組算 3Y 夏普／最差年度跌幅組內百分位與年度勝率,套三道門檻篩出 `passed`,並列 `rejected_count`、`insufficient` |
 | GET | `/api/meta/categories` | 基金組別清單與檔數 |
 | GET | `/api/meta/runs` | 近 20 次抓取紀錄 |
 
@@ -67,4 +67,5 @@ npm run deploy
 - 風險指標 `as_of`：境內用指標截止日（月更），境外回退月底基準日——**同一表內 as_of 可能跨月份**，嚴格同期比較時需自行對齊。日期若為鉅亨的 `1900-` 哨兵值則存 null。
 - `ret_3m`／`ret_6m`（`perF_3MMEJ`／`perF_6MMEJ`）為近 3／6 個月報酬，**月底基準**，與 `ret_1y..5y` 同口徑。
 - **Beta 本資料源沒有**，需日後自公開 NAV + 指定基準回歸自算（見 spec 第 5 節）。
-- `analyze` 的 `score` 只在同 `category` 組內有意義，是相對穩健度，不是買賣建議。
+- `screen` 的百分位與勝率只在同 `(category, currency)` 組內有意義，是相對位置，不是買賣建議。
+- `year_ROI*`／`year_MaxQuoteChange*` 期間口徑未驗證，僅用於同組相對比較，回應標示 `basis: "anue_year_fields_unverified"`，不顯示為「某年報酬」。

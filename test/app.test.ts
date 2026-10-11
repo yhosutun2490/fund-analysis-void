@@ -15,9 +15,24 @@ describe("worker http surface", () => {
     expect(body.disclaimer).toBeTruthy();
   });
 
-  it("GET /api/analyze 缺 category 回 400", async () => {
-    const res = await app.request("/api/analyze");
+  it("GET /api/screen 缺 category 回 400", async () => {
+    const res = await app.request("/api/screen");
     expect(res.status).toBe(400);
+  });
+
+  it("GET /api/screen minSharpePct 超出 0–100 回 400", async () => {
+    const res = await app.request("/api/screen?category=台灣股票&minSharpePct=200");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/screen minWins 超出 0–5 回 400", async () => {
+    const res = await app.request("/api/screen?category=台灣股票&minWins=9");
+    expect(res.status).toBe(400);
+  });
+
+  it("舊的 /api/analyze 已移除(404)", async () => {
+    const res = await app.request("/api/analyze?category=台灣股票");
+    expect(res.status).toBe(404);
   });
 
   it("未知路徑回 404", async () => {
@@ -26,7 +41,7 @@ describe("worker http surface", () => {
   });
 
   it("/api/* 帶 CORS 標頭", async () => {
-    const res = await app.request("/api/analyze", {
+    const res = await app.request("/api/screen", {
       headers: { Origin: "http://example.com" },
     });
     expect(res.headers.get("access-control-allow-origin")).toBe("*");

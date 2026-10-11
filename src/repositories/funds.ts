@@ -1,4 +1,4 @@
-import type { RiskRow } from "../analysis";
+import type { ScreenRow } from "../screen";
 
 // 以最新 as_of 的風險快照 join 基金基本資料
 const LATEST_RISK_CTE = `
@@ -64,15 +64,28 @@ export async function listFunds(db: D1Database, q: FundListQuery) {
   return results;
 }
 
-/** 同類分析用：某 category（可選 currency）的最新快照 */
-export async function listLatestByCategory(db: D1Database, category: string, currency?: string): Promise<RiskRow[]> {
+// 初篩用：某 category（可選 currency）的最新快照,帶齊百分位/勝率所需欄位
+const SCREEN_CTE = `
+  WITH latest AS (
+    SELECT fund_id, MAX(as_of) AS as_of FROM fund_risk GROUP BY fund_id
+  )
+  SELECT f.fund_id, f.name, f.category, f.currency, f.rr, r.as_of,
+         r.sharpe_3y, r.ret_1y,
+         r.roi_y1, r.roi_y2, r.roi_y3, r.roi_y4, r.roi_y5,
+         r.maxdrop_y1, r.maxdrop_y2, r.maxdrop_y3, r.maxdrop_y4, r.maxdrop_y5
+  FROM funds f
+  JOIN latest l ON l.fund_id = f.fund_id
+  JOIN fund_risk r ON r.fund_id = f.fund_id AND r.as_of = l.as_of
+`;
+
+/** 初篩：某 category（可選 currency）的完整組最新快照。 */
+export async function listScreenRows(db: D1Database, category: string, currency?: string): Promise<ScreenRow[]> {
   const binds: unknown[] = [category];
   let filter = "f.category = ?";
   if (currency) { filter += " AND f.currency = ?"; binds.push(currency); }
-
-  const sql = `${LATEST_RISK_CTE} WHERE ${filter}`;
+  const sql = `${SCREEN_CTE} WHERE ${filter}`;
   const { results } = await db.prepare(sql).bind(...binds).all();
-  return results as unknown as RiskRow[];
+  return results as unknown as ScreenRow[];
 }
 
 export function getFund(db: D1Database, id: string) {
