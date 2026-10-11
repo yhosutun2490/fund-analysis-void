@@ -4,10 +4,16 @@ import { app } from "../src/app";
 
 const client = testClient(app);
 
-// 空結果 D1:讓通過驗證的請求能跑到底(不連真 DB)
-const emptyDB = {
-  prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), first: async () => null }) }),
-} as unknown as D1Database;
+// 空結果 D1:讓通過驗證的請求能跑到底(不連真 DB)。
+// drizzle-d1 的 all() 底層走 raw(),故 stub 需自我回傳並提供 raw/all/run/first。
+const stmt: Record<string, unknown> = {
+  bind: () => stmt,
+  all: async () => ({ results: [], success: true, meta: {} }),
+  raw: async () => [],
+  run: async () => ({ results: [], success: true, meta: {} }),
+  first: async () => null,
+};
+const emptyDB = { prepare: () => stmt, batch: async () => [] } as unknown as D1Database;
 const env = { DB: emptyDB };
 
 describe("worker http surface", () => {

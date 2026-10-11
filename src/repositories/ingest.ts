@@ -1,89 +1,90 @@
+import type { BatchItem } from "drizzle-orm/batch";
+import { desc, eq } from "drizzle-orm";
 import type { FundRecord } from "../anue";
+import { makeDb } from "../db/client";
+import { fundRisk, funds, ingestRuns } from "../db/schema";
 
-/** 把一批正規化記錄寫入 D1。funds 覆蓋更新；fund_risk 以 (fund_id, as_of) upsert 累積月歷史。 */
+/** 把一批正規化記錄寫入 D1。funds 覆蓋更新;fund_risk 以 (fund_id, as_of) upsert 累積月歷史。 */
 export async function upsertRecords(db: D1Database, records: FundRecord[]): Promise<number> {
+  const drizzle = makeDb(db);
   const now = new Date().toISOString();
 
-  const fundStmt = db.prepare(
-    `INSERT INTO funds (fund_id, isin, lipper_id, name, fund_group, category, currency, domicile, rr, esg_score, setup_date, aum_twd, updated_at)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
-     ON CONFLICT(fund_id) DO UPDATE SET
-       isin=?2, lipper_id=?3, name=?4, fund_group=?5, category=?6, currency=?7, domicile=?8,
-       rr=?9, esg_score=?10, setup_date=?11, aum_twd=?12, updated_at=?13`,
-  );
-
-  const riskStmt = db.prepare(
-    `INSERT INTO fund_risk (fund_id, as_of, std_1y, sharpe_1y, sharpe_3y, sharpe_5y, sharpe_10y,
-       ret_3m, ret_6m, ret_1y, ret_3y, ret_5y, roi_y1, roi_y2, roi_y3, roi_y4, roi_y5,
-       maxdrop_y1, maxdrop_y2, maxdrop_y3, maxdrop_y4, maxdrop_y5, lipper_total, nav, nav_date, ingested_at)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)
-     ON CONFLICT(fund_id, as_of) DO UPDATE SET
-       std_1y=?3, sharpe_1y=?4, sharpe_3y=?5, sharpe_5y=?6, sharpe_10y=?7,
-       ret_3m=?8, ret_6m=?9, ret_1y=?10, ret_3y=?11, ret_5y=?12, roi_y1=?13, roi_y2=?14, roi_y3=?15, roi_y4=?16, roi_y5=?17,
-       maxdrop_y1=?18, maxdrop_y2=?19, maxdrop_y3=?20, maxdrop_y4=?21, maxdrop_y5=?22,
-       lipper_total=?23, nav=?24, nav_date=?25, ingested_at=?26`,
-  );
-
-  const batch: D1PreparedStatement[] = [];
+  const batch: BatchItem<"sqlite">[] = [];
   let upserted = 0;
+
   for (const rec of records) {
     const f = rec.fund;
+    const fv = {
+      fundId: f.fund_id, isin: f.isin, lipperId: f.lipper_id, name: f.name,
+      fundGroup: f.fund_group, category: f.category, currency: f.currency, domicile: f.domicile,
+      rr: f.rr, esgScore: f.esg_score, setupDate: f.setup_date, aumTwd: f.aum_twd, updatedAt: now,
+    };
     batch.push(
-      fundStmt.bind(
-        f.fund_id, f.isin, f.lipper_id, f.name, f.fund_group, f.category, f.currency,
-        f.domicile, f.rr, f.esg_score, f.setup_date, f.aum_twd, now,
-      ),
+      drizzle.insert(funds).values(fv).onConflictDoUpdate({
+        target: funds.fundId,
+        // 不覆寫 investment_area（由另一步驟維護）
+        set: { isin: fv.isin, lipperId: fv.lipperId, name: fv.name, fundGroup: fv.fundGroup, category: fv.category, currency: fv.currency, domicile: fv.domicile, rr: fv.rr, esgScore: fv.esgScore, setupDate: fv.setupDate, aumTwd: fv.aumTwd, updatedAt: fv.updatedAt },
+      }),
     );
+
     // 沒有資料截至日就跳過風險快照（不得以空值佔位）
-    if (rec.risk.as_of) {
+    const asOf = rec.risk.as_of;
+    if (asOf) {
       const k = rec.risk;
-      batch.push(
-        riskStmt.bind(
-          f.fund_id, k.as_of, k.std_1y, k.sharpe_1y, k.sharpe_3y, k.sharpe_5y, k.sharpe_10y,
-          k.ret_3m, k.ret_6m, k.ret_1y, k.ret_3y, k.ret_5y, k.roi_y1, k.roi_y2, k.roi_y3, k.roi_y4, k.roi_y5,
-          k.maxdrop_y1, k.maxdrop_y2, k.maxdrop_y3, k.maxdrop_y4, k.maxdrop_y5,
-          k.lipper_total, k.nav, k.nav_date, now,
-        ),
-      );
+      const rv = {
+        fundId: f.fund_id, asOf, std1y: k.std_1y, sharpe1y: k.sharpe_1y, sharpe3y: k.sharpe_3y,
+        sharpe5y: k.sharpe_5y, sharpe10y: k.sharpe_10y, ret3m: k.ret_3m, ret6m: k.ret_6m, ret1y: k.ret_1y,
+        ret3y: k.ret_3y, ret5y: k.ret_5y, roiY1: k.roi_y1, roiY2: k.roi_y2, roiY3: k.roi_y3, roiY4: k.roi_y4, roiY5: k.roi_y5,
+        maxdropY1: k.maxdrop_y1, maxdropY2: k.maxdrop_y2, maxdropY3: k.maxdrop_y3, maxdropY4: k.maxdrop_y4, maxdropY5: k.maxdrop_y5,
+        lipperTotal: k.lipper_total, nav: k.nav, navDate: k.nav_date, ingestedAt: now,
+      };
+      const { fundId: _f, asOf: _a, ...riskUpdate } = rv;
+      batch.push(drizzle.insert(fundRisk).values(rv).onConflictDoUpdate({ target: [fundRisk.fundId, fundRisk.asOf], set: riskUpdate }));
       upserted++;
     }
   }
 
-  // D1 batch 一次上限較小，分塊送
+  // D1 batch 一次上限較小,分塊送
   const CHUNK = 50;
   for (let i = 0; i < batch.length; i += CHUNK) {
-    await db.batch(batch.slice(i, i + CHUNK));
+    const slice = batch.slice(i, i + CHUNK);
+    if (slice.length) await drizzle.batch(slice as [(typeof slice)[number], ...(typeof slice)[number][]]);
   }
   return upserted;
 }
 
 /** 更新各基金的投資區域（funds.investment_area）。回傳更新筆數。 */
 export async function updateInvestmentAreas(db: D1Database, areaOf: Map<string, string>): Promise<number> {
-  const stmt = db.prepare("UPDATE funds SET investment_area = ?2 WHERE fund_id = ?1");
-  const batch = [...areaOf].map(([id, area]) => stmt.bind(id, area));
+  const drizzle = makeDb(db);
+  const stmts = [...areaOf].map(([id, area]) =>
+    drizzle.update(funds).set({ investmentArea: area }).where(eq(funds.fundId, id)),
+  );
   const CHUNK = 50;
-  for (let i = 0; i < batch.length; i += CHUNK) {
-    await db.batch(batch.slice(i, i + CHUNK));
+  for (let i = 0; i < stmts.length; i += CHUNK) {
+    const slice = stmts.slice(i, i + CHUNK);
+    if (slice.length) await drizzle.batch(slice as [(typeof slice)[number], ...(typeof slice)[number][]]);
   }
-  return batch.length;
+  return stmts.length;
 }
 
 export async function recordRun(
   db: D1Database,
   run: { started_at: string; finished_at: string; data_time: string | null; total_count: number; upserted: number; status: string; note?: string },
 ): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO ingest_runs (started_at, finished_at, data_time, total_count, upserted, status, note)
-       VALUES (?1,?2,?3,?4,?5,?6,?7)`,
-    )
-    .bind(run.started_at, run.finished_at, run.data_time, run.total_count, run.upserted, run.status, run.note ?? null)
-    .run();
+  await makeDb(db).insert(ingestRuns).values({
+    startedAt: run.started_at, finishedAt: run.finished_at, dataTime: run.data_time,
+    totalCount: run.total_count, upserted: run.upserted, status: run.status, note: run.note ?? null,
+  });
 }
 
 export async function listRuns(db: D1Database) {
-  const { results } = await db
-    .prepare("SELECT * FROM ingest_runs ORDER BY id DESC LIMIT 20")
-    .all();
-  return results;
+  return makeDb(db)
+    .select({
+      id: ingestRuns.id, started_at: ingestRuns.startedAt, finished_at: ingestRuns.finishedAt,
+      data_time: ingestRuns.dataTime, total_count: ingestRuns.totalCount, upserted: ingestRuns.upserted,
+      status: ingestRuns.status, note: ingestRuns.note,
+    })
+    .from(ingestRuns)
+    .orderBy(desc(ingestRuns.id))
+    .limit(20);
 }

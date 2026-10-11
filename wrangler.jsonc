@@ -14,7 +14,9 @@
     {
       "binding": "DB",
       "database_name": "fund_risks",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      // Drizzle 產生的 migration 目錄(drizzle-kit generate)
+      "migrations_dir": "drizzle"
     }
   ],
 

@@ -19,26 +19,24 @@ POST /admin/ingest ─┴─▶ fetchAllFunds() ─▶ normalize(哨兵值→nul
 ```
 
 - `src/anue.ts`：抓取 + 正規化（`pageSize` 2000、3 頁抓完 4540 檔；`-99999999.9999` → null）
-- `src/db.ts`：D1 upsert（`funds` 覆蓋更新、`fund_risk` 以 `(fund_id, as_of)` 累積月快照）
+- `src/db/schema.ts`：**D1 schema 唯一真相來源（Drizzle）**；型別與 migration 都從它衍生
+- `src/db/client.ts`：`makeDb(env.DB)` 建立帶 schema 的 drizzle 實例
+- `src/repositories/*`：以 Drizzle 查詢（`funds` 覆蓋更新、`fund_risk` 以 `(fund_id, as_of)` 累積月快照）
 - `src/screen.ts`：快照初篩純計算（同組百分位、年度勝率、入選規則；描述性，非建議）
 - `src/anuePrice.ts`：鉅亨含息序列抓取（切塊、併發、串接）；`src/recovery.ts`：回撤／近期報酬純計算
 - `src/services/recovery.ts`：序列快取新鮮度 → 抓取／存檔 → 計算；`src/repositories/series.ts`：`fund_series` 讀寫
 - `src/index.ts`：Hono 路由 + `scheduled` cron handler
-- `schema.sql`：D1 schema
+- `drizzle/`：`drizzle-kit generate` 產生的 migration（由 schema.ts 衍生,勿手改）
 
 ## 設定與啟動
 
 ```bash
 npm install
 
-# 1. 建立 D1，把回傳的 database_id 填進 wrangler.toml
+# 1. 建立 D1，把回傳的 database_id 填進 wrangler.jsonc
 npx wrangler d1 create fund_risks
 
-# 2. 灌 schema
-npm run db:init            # 本地
-npm run db:init:remote     # 線上
-
-# 既有 DB 升級（新欄位 ret_3m/ret_6m）；全新建庫不需要
+# 2. 套用 migration（schema 改動後先 npm run db:generate 產生新 migration）
 npm run db:migrate         # 本地
 npm run db:migrate:remote  # 線上
 

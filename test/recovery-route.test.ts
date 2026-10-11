@@ -35,7 +35,7 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("GET /api/funds/:id/recovery — 錯誤處理", () => {
   it("未知基金 → 404", async () => {
-    vi.mocked(getFund).mockResolvedValue(null);
+    vi.mocked(getFund).mockResolvedValue(null as never);
     const res = await req("/api/funds/NOPE/recovery");
     expect(res.status).toBe(404);
   });

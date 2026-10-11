@@ -1,27 +1,26 @@
+import { type AnyColumn, and, asc, count, desc, eq, gte, inArray, lte, max, type SQL, sql } from "drizzle-orm";
+import { makeDb } from "../db/client";
+import { fundRisk, funds, fundSeries } from "../db/schema";
 import type { ScreenRow } from "../screen";
 
-// 以最新 as_of 的風險快照 join 基金基本資料
-const LATEST_RISK_CTE = `
-  WITH latest AS (
-    SELECT fund_id, MAX(as_of) AS as_of FROM fund_risk GROUP BY fund_id
-  )
-  SELECT f.fund_id, f.name, f.fund_group, f.category, f.currency, f.domicile, f.rr,
-         f.esg_score, f.aum_twd, f.setup_date,
-         r.as_of, r.std_1y, r.sharpe_1y, r.sharpe_3y, r.sharpe_5y, r.sharpe_10y,
-         r.ret_1y, r.ret_3y, r.ret_5y, r.maxdrop_y1, r.lipper_total, r.nav, r.nav_date
-  FROM funds f
-  JOIN latest l ON l.fund_id = f.fund_id
-  JOIN fund_risk r ON r.fund_id = f.fund_id AND r.as_of = l.as_of
-`;
+// funds 全欄位 → snake_case（維持 getFund 的既有 SELECT * 形狀）
+const fundCols = {
+  fund_id: funds.fundId, isin: funds.isin, lipper_id: funds.lipperId, name: funds.name,
+  fund_group: funds.fundGroup, category: funds.category, currency: funds.currency,
+  domicile: funds.domicile, investment_area: funds.investmentArea, rr: funds.rr,
+  esg_score: funds.esgScore, setup_date: funds.setupDate, aum_twd: funds.aumTwd, updated_at: funds.updatedAt,
+} as const;
 
-const SORTABLE: Record<string, string> = {
-  sharpe_3y: "r.sharpe_3y",
-  sharpe_1y: "r.sharpe_1y",
-  std_1y: "r.std_1y",
-  ret_3y: "r.ret_3y",
-  ret_1y: "r.ret_1y",
-  aum_twd: "f.aum_twd",
-};
+// fund_risk 全欄位 → snake_case
+const riskCols = {
+  fund_id: fundRisk.fundId, as_of: fundRisk.asOf, std_1y: fundRisk.std1y,
+  sharpe_1y: fundRisk.sharpe1y, sharpe_3y: fundRisk.sharpe3y, sharpe_5y: fundRisk.sharpe5y, sharpe_10y: fundRisk.sharpe10y,
+  ret_3m: fundRisk.ret3m, ret_6m: fundRisk.ret6m, ret_1y: fundRisk.ret1y, ret_3y: fundRisk.ret3y, ret_5y: fundRisk.ret5y,
+  roi_y1: fundRisk.roiY1, roi_y2: fundRisk.roiY2, roi_y3: fundRisk.roiY3, roi_y4: fundRisk.roiY4, roi_y5: fundRisk.roiY5,
+  maxdrop_y1: fundRisk.maxdropY1, maxdrop_y2: fundRisk.maxdropY2, maxdrop_y3: fundRisk.maxdropY3,
+  maxdrop_y4: fundRisk.maxdropY4, maxdrop_y5: fundRisk.maxdropY5,
+  lipper_total: fundRisk.lipperTotal, nav: fundRisk.nav, nav_date: fundRisk.navDate, ingested_at: fundRisk.ingestedAt,
+} as const;
 
 export interface FundListQuery {
   group?: string;
@@ -31,56 +30,64 @@ export interface FundListQuery {
   domicile?: string;
   minSharpe3y?: number;
   maxStd1y?: number;
-  sort?: string; // 不在 SORTABLE 內則回退 sharpe_3y
+  sort?: string;
   order: "ASC" | "DESC";
   limit: number;
   offset: number;
 }
 
-/** 基金清單 + 篩選 + 排序（以最新快照） */
-export async function listFunds(db: D1Database, q: FundListQuery) {
-  const where: string[] = [];
-  const binds: unknown[] = [];
-  const add = (cond: string, val: unknown) => { where.push(cond); binds.push(val); };
+const SORTABLE: Record<string, AnyColumn> = {
+  sharpe_3y: fundRisk.sharpe3y,
+  sharpe_1y: fundRisk.sharpe1y,
+  std_1y: fundRisk.std1y,
+  ret_3y: fundRisk.ret3y,
+  ret_1y: fundRisk.ret1y,
+  aum_twd: funds.aumTwd,
+};
 
-  if (q.group) add("f.fund_group = ?", q.group);
-  if (q.category) add("f.category = ?", q.category);
-  if (q.currency) add("f.currency = ?", q.currency);
-  if (q.rr) add("f.rr = ?", q.rr);
-  if (q.domicile) add("f.domicile = ?", q.domicile);
-  if (q.minSharpe3y !== undefined) add("r.sharpe_3y >= ?", q.minSharpe3y);
-  if (q.maxStd1y !== undefined) add("r.std_1y <= ?", q.maxStd1y);
-
-  const sortCol = SORTABLE[q.sort ?? "sharpe_3y"] ?? "r.sharpe_3y";
-
-  // NULL 排在最後
-  const sql =
-    `${LATEST_RISK_CTE}` +
-    (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
-    ` ORDER BY (${sortCol} IS NULL), ${sortCol} ${q.order} LIMIT ? OFFSET ?`;
-  binds.push(q.limit, q.offset);
-
-  const { results } = await db.prepare(sql).bind(...binds).all();
-  return results;
+/** 以最新 as_of 的風險快照 join 基金基本資料的 CTE（最新一筆）。 */
+function latestCte(db: ReturnType<typeof makeDb>) {
+  return db.$with("latest").as(
+    db.select({ fundId: fundRisk.fundId, latestAsOf: max(fundRisk.asOf).as("latest_as_of") }).from(fundRisk).groupBy(fundRisk.fundId),
+  );
 }
 
-// 初篩用：某 category（可選 currency）的最新快照,帶齊百分位/勝率所需欄位
-const SCREEN_CTE = `
-  WITH latest AS (
-    SELECT fund_id, MAX(as_of) AS as_of FROM fund_risk GROUP BY fund_id
-  )
-  SELECT f.fund_id, f.name, f.category, f.currency, f.rr, r.as_of,
-         r.sharpe_3y, r.ret_3m, r.ret_6m, r.ret_1y,
-         r.roi_y1, r.roi_y2, r.roi_y3, r.roi_y4, r.roi_y5,
-         r.maxdrop_y1, r.maxdrop_y2, r.maxdrop_y3, r.maxdrop_y4, r.maxdrop_y5,
-         s.series_end AS rec_series_end, s.mdd AS rec_mdd, s.mdd_recovered AS rec_mdd_recovered,
-         s.mdd_underwater_days AS rec_mdd_underwater_days,
-         s.still_underwater_ratio AS rec_still_underwater_ratio, s.loss_prob_1y AS rec_loss_prob_1y
-  FROM funds f
-  JOIN latest l ON l.fund_id = f.fund_id
-  JOIN fund_risk r ON r.fund_id = f.fund_id AND r.as_of = l.as_of
-  LEFT JOIN fund_series s ON s.fund_id = f.fund_id
-`;
+/** 基金清單 + 篩選 + 排序（以最新快照） */
+export async function listFunds(db: D1Database, q: FundListQuery) {
+  const drizzle = makeDb(db);
+  const latest = latestCte(drizzle);
+
+  const conds: SQL[] = [];
+  if (q.group) conds.push(eq(funds.fundGroup, q.group));
+  if (q.category) conds.push(eq(funds.category, q.category));
+  if (q.currency) conds.push(eq(funds.currency, q.currency));
+  if (q.rr) conds.push(eq(funds.rr, q.rr));
+  if (q.domicile) conds.push(eq(funds.domicile, q.domicile));
+  if (q.minSharpe3y !== undefined) conds.push(gte(fundRisk.sharpe3y, q.minSharpe3y));
+  if (q.maxStd1y !== undefined) conds.push(lte(fundRisk.std1y, q.maxStd1y));
+
+  const sortCol = SORTABLE[q.sort ?? "sharpe_3y"] ?? fundRisk.sharpe3y;
+  const dir = q.order === "ASC" ? asc(sortCol) : desc(sortCol);
+
+  return drizzle
+    .with(latest)
+    .select({
+      fund_id: funds.fundId, name: funds.name, fund_group: funds.fundGroup, category: funds.category,
+      currency: funds.currency, domicile: funds.domicile, rr: funds.rr, esg_score: funds.esgScore,
+      aum_twd: funds.aumTwd, setup_date: funds.setupDate,
+      as_of: fundRisk.asOf, std_1y: fundRisk.std1y, sharpe_1y: fundRisk.sharpe1y, sharpe_3y: fundRisk.sharpe3y,
+      sharpe_5y: fundRisk.sharpe5y, sharpe_10y: fundRisk.sharpe10y, ret_1y: fundRisk.ret1y, ret_3y: fundRisk.ret3y,
+      ret_5y: fundRisk.ret5y, maxdrop_y1: fundRisk.maxdropY1, lipper_total: fundRisk.lipperTotal,
+      nav: fundRisk.nav, nav_date: fundRisk.navDate,
+    })
+    .from(funds)
+    .innerJoin(latest, eq(latest.fundId, funds.fundId))
+    .innerJoin(fundRisk, and(eq(fundRisk.fundId, funds.fundId), eq(fundRisk.asOf, latest.latestAsOf)))
+    .where(conds.length ? and(...conds) : undefined)
+    .orderBy(sql`${sortCol} is null`, dir)
+    .limit(q.limit)
+    .offset(q.offset);
+}
 
 export interface ScreenFilters {
   categories?: string[];
@@ -91,63 +98,72 @@ export interface ScreenFilters {
   maxRr?: number;
 }
 
-function inClause(col: string, vals: string[], binds: unknown[]): string {
-  binds.push(...vals);
-  return `${col} IN (${vals.map(() => "?").join(",")})`;
-}
-
 /** 符合範圍篩選的基金 key（決定命中組與 matched 集合;同參數 OR、跨參數 AND）。 */
 export async function listMatchedKeys(
   db: D1Database,
   f: ScreenFilters,
 ): Promise<{ fund_id: string; category: string | null; currency: string | null }[]> {
-  const where: string[] = [];
-  const binds: unknown[] = [];
-  if (f.categories?.length) where.push(inClause("category", f.categories, binds));
-  if (f.areas?.length) where.push(inClause("investment_area", f.areas, binds));
-  if (f.groups?.length) where.push(inClause("fund_group", f.groups, binds));
-  if (f.domiciles?.length) where.push(inClause("domicile", f.domiciles, binds));
-  if (f.currencies?.length) where.push(inClause("currency", f.currencies, binds));
+  const conds: SQL[] = [];
+  if (f.categories?.length) conds.push(inArray(funds.category, f.categories));
+  if (f.areas?.length) conds.push(inArray(funds.investmentArea, f.areas));
+  if (f.groups?.length) conds.push(inArray(funds.fundGroup, f.groups));
+  if (f.domiciles?.length) conds.push(inArray(funds.domicile, f.domiciles));
+  if (f.currencies?.length) conds.push(inArray(funds.currency, f.currencies));
   if (f.maxRr !== undefined) {
     const rrs = Array.from({ length: f.maxRr }, (_, i) => `RR${i + 1}`);
-    where.push(inClause("rr", rrs, binds));
+    conds.push(inArray(funds.rr, rrs));
   }
-  const sql = `SELECT fund_id, category, currency FROM funds${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
-  const { results } = await db.prepare(sql).bind(...binds).all();
-  return results as unknown as { fund_id: string; category: string | null; currency: string | null }[];
+  return makeDb(db)
+    .select({ fund_id: funds.fundId, category: funds.category, currency: funds.currency })
+    .from(funds)
+    .where(conds.length ? and(...conds) : undefined);
 }
 
-/** 指定 categories 的完整組最新快照（不套其他篩選,作為百分位基準）。 */
+/** 指定 categories 的完整組最新快照（不套其他篩選,作為百分位基準;left join fund_series 摘要）。 */
 export async function listFullGroups(db: D1Database, categories: string[]): Promise<ScreenRow[]> {
   if (categories.length === 0) return [];
-  const sql = `${SCREEN_CTE} WHERE f.category IN (${categories.map(() => "?").join(",")})`;
-  const { results } = await db.prepare(sql).bind(...categories).all();
-  return results as unknown as ScreenRow[];
+  const drizzle = makeDb(db);
+  const latest = latestCte(drizzle);
+  const rows = await drizzle
+    .with(latest)
+    .select({
+      fund_id: funds.fundId, name: funds.name, category: funds.category, currency: funds.currency, rr: funds.rr,
+      as_of: fundRisk.asOf, sharpe_3y: fundRisk.sharpe3y, ret_3m: fundRisk.ret3m, ret_6m: fundRisk.ret6m, ret_1y: fundRisk.ret1y,
+      roi_y1: fundRisk.roiY1, roi_y2: fundRisk.roiY2, roi_y3: fundRisk.roiY3, roi_y4: fundRisk.roiY4, roi_y5: fundRisk.roiY5,
+      maxdrop_y1: fundRisk.maxdropY1, maxdrop_y2: fundRisk.maxdropY2, maxdrop_y3: fundRisk.maxdropY3,
+      maxdrop_y4: fundRisk.maxdropY4, maxdrop_y5: fundRisk.maxdropY5,
+      rec_series_end: fundSeries.seriesEnd, rec_mdd: fundSeries.mdd, rec_mdd_recovered: fundSeries.mddRecovered,
+      rec_mdd_underwater_days: fundSeries.mddUnderwaterDays, rec_still_underwater_ratio: fundSeries.stillUnderwaterRatio,
+      rec_loss_prob_1y: fundSeries.lossProb1y,
+    })
+    .from(funds)
+    .innerJoin(latest, eq(latest.fundId, funds.fundId))
+    .innerJoin(fundRisk, and(eq(fundRisk.fundId, funds.fundId), eq(fundRisk.asOf, latest.latestAsOf)))
+    .leftJoin(fundSeries, eq(fundSeries.fundId, funds.fundId))
+    .where(inArray(funds.category, categories));
+  return rows as ScreenRow[];
 }
 
-export function getFund(db: D1Database, id: string) {
-  return db.prepare("SELECT * FROM funds WHERE fund_id = ?").bind(id).first();
+export async function getFund(db: D1Database, id: string) {
+  const [row] = await makeDb(db).select(fundCols).from(funds).where(eq(funds.fundId, id)).limit(1);
+  return row ?? null;
 }
 
-export function getLatestRisk(db: D1Database, id: string) {
-  return db
-    .prepare("SELECT * FROM fund_risk WHERE fund_id = ? ORDER BY as_of DESC LIMIT 1")
-    .bind(id)
-    .first();
+export async function getLatestRisk(db: D1Database, id: string) {
+  const [row] = await makeDb(db).select(riskCols).from(fundRisk).where(eq(fundRisk.fundId, id)).orderBy(desc(fundRisk.asOf)).limit(1);
+  return row ?? null;
 }
 
 /** 單檔風險歷史（cron 累積出來的月序列） */
 export async function getRiskHistory(db: D1Database, id: string) {
-  const { results } = await db
-    .prepare("SELECT * FROM fund_risk WHERE fund_id = ? ORDER BY as_of ASC")
-    .bind(id)
-    .all();
-  return results;
+  return makeDb(db).select(riskCols).from(fundRisk).where(eq(fundRisk.fundId, id)).orderBy(asc(fundRisk.asOf));
 }
 
 export async function listCategories(db: D1Database) {
-  const { results } = await db
-    .prepare("SELECT category, fund_group, COUNT(*) AS n FROM funds WHERE category IS NOT NULL GROUP BY category ORDER BY n DESC")
-    .all();
-  return results;
+  return makeDb(db)
+    .select({ category: funds.category, fund_group: funds.fundGroup, n: count() })
+    .from(funds)
+    .where(sql`${funds.category} is not null`)
+    .groupBy(funds.category)
+    .orderBy(desc(count()));
 }

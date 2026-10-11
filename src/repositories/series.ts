@@ -1,3 +1,6 @@
+import { eq } from "drizzle-orm";
+import { makeDb } from "../db/client";
+import { fundSeries } from "../db/schema";
 import type { SeriesPoint } from "../recovery";
 
 export interface SeriesRow {
@@ -14,8 +17,24 @@ export interface SeriesRow {
   loss_prob_1y: number | null;
 }
 
-export function getSeries(db: D1Database, fundId: string): Promise<SeriesRow | null> {
-  return db.prepare("SELECT * FROM fund_series WHERE fund_id = ?").bind(fundId).first<SeriesRow>();
+// 以 snake_case 別名輸出,維持既有 SeriesRow 形狀
+const COLS = {
+  fund_id: fundSeries.fundId,
+  basis: fundSeries.basis,
+  series_start: fundSeries.seriesStart,
+  series_end: fundSeries.seriesEnd,
+  points: fundSeries.points,
+  fetched_at: fundSeries.fetchedAt,
+  mdd: fundSeries.mdd,
+  mdd_recovered: fundSeries.mddRecovered,
+  mdd_underwater_days: fundSeries.mddUnderwaterDays,
+  still_underwater_ratio: fundSeries.stillUnderwaterRatio,
+  loss_prob_1y: fundSeries.lossProb1y,
+} as const;
+
+export async function getSeries(db: D1Database, fundId: string): Promise<SeriesRow | null> {
+  const [row] = await makeDb(db).select(COLS).from(fundSeries).where(eq(fundSeries.fundId, fundId)).limit(1);
+  return row ?? null;
 }
 
 export interface SeriesSummary {
@@ -32,23 +51,19 @@ export async function saveSeries(
   s: { fund_id: string; basis: string; series_start: string; series_end: string; points: SeriesPoint[]; fetched_at: string },
   summary: SeriesSummary = {},
 ): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO fund_series
-         (fund_id, basis, series_start, series_end, points, fetched_at,
-          mdd, mdd_recovered, mdd_underwater_days, still_underwater_ratio, loss_prob_1y)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
-       ON CONFLICT(fund_id) DO UPDATE SET
-         basis=?2, series_start=?3, series_end=?4, points=?5, fetched_at=?6,
-         mdd=?7, mdd_recovered=?8, mdd_underwater_days=?9, still_underwater_ratio=?10, loss_prob_1y=?11`,
-    )
-    .bind(
-      s.fund_id, s.basis, s.series_start, s.series_end, JSON.stringify(s.points), s.fetched_at,
-      summary.mdd ?? null,
-      summary.mdd_recovered == null ? null : summary.mdd_recovered ? 1 : 0,
-      summary.mdd_underwater_days ?? null,
-      summary.still_underwater_ratio ?? null,
-      summary.loss_prob_1y ?? null,
-    )
-    .run();
+  const values = {
+    fundId: s.fund_id,
+    basis: s.basis,
+    seriesStart: s.series_start,
+    seriesEnd: s.series_end,
+    points: JSON.stringify(s.points),
+    fetchedAt: s.fetched_at,
+    mdd: summary.mdd ?? null,
+    mddRecovered: summary.mdd_recovered == null ? null : summary.mdd_recovered ? 1 : 0,
+    mddUnderwaterDays: summary.mdd_underwater_days ?? null,
+    stillUnderwaterRatio: summary.still_underwater_ratio ?? null,
+    lossProb1y: summary.loss_prob_1y ?? null,
+  };
+  const { fundId: _k, ...update } = values;
+  await makeDb(db).insert(fundSeries).values(values).onConflictDoUpdate({ target: fundSeries.fundId, set: update });
 }
