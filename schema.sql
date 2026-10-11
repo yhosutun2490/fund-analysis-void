@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS funds (
   category     TEXT,               -- lippertW2_CHI，如 台灣股票
   currency     TEXT,               -- fundCcyCode
   domicile     TEXT,               -- 'onshore'(A) / 'offshore'(B)（由代碼推斷）
+  investment_area TEXT,            -- 投資區域（全球/亞洲/北美洲…），以 InvestmentArea 篩選反查建立
   rr           TEXT,               -- RR1..RR5
   esg_score    REAL,
   setup_date   TEXT,
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS funds (
 CREATE INDEX IF NOT EXISTS idx_funds_group    ON funds(fund_group);
 CREATE INDEX IF NOT EXISTS idx_funds_category ON funds(category);
 CREATE INDEX IF NOT EXISTS idx_funds_rr       ON funds(rr);
+CREATE INDEX IF NOT EXISTS idx_funds_area     ON funds(investment_area);
 
 -- 風險指標快照（(fund_id, as_of) 為 key，每月累積一筆 —— 這是鉅亨不會給你的歷史）
 CREATE TABLE IF NOT EXISTS fund_risk (

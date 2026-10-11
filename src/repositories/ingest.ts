@@ -57,6 +57,17 @@ export async function upsertRecords(db: D1Database, records: FundRecord[]): Prom
   return upserted;
 }
 
+/** 更新各基金的投資區域（funds.investment_area）。回傳更新筆數。 */
+export async function updateInvestmentAreas(db: D1Database, areaOf: Map<string, string>): Promise<number> {
+  const stmt = db.prepare("UPDATE funds SET investment_area = ?2 WHERE fund_id = ?1");
+  const batch = [...areaOf].map(([id, area]) => stmt.bind(id, area));
+  const CHUNK = 50;
+  for (let i = 0; i < batch.length; i += CHUNK) {
+    await db.batch(batch.slice(i, i + CHUNK));
+  }
+  return batch.length;
+}
+
 export async function recordRun(
   db: D1Database,
   run: { started_at: string; finished_at: string; data_time: string | null; total_count: number; upserted: number; status: string; note?: string },

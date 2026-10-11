@@ -94,6 +94,90 @@ export async function fetchAllFunds(
   return { rows, dataTime: first.dataTime, dataCount: total };
 }
 
+// ── 投資區域（市場）對照 ──────────────────────────────────────────
+// Search/Detail 的 fundDatas[] 無投資區域欄位；改以 InvestmentArea 篩選反查 data.fundIDs。
+
+interface AnueConditionGroup {
+  groupID: string;
+  parameters?: { parameterValue: string }[];
+}
+interface AreaResponse {
+  succ: boolean;
+  code: string;
+  message?: string;
+  data: { fundIDs: string; condition?: { groups?: AnueConditionGroup[] } } | null;
+}
+
+async function post(body: Record<string, unknown>): Promise<AreaResponse> {
+  const res = await fetch(ANUE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Anue HTTP ${res.status}`);
+  const json = (await res.json()) as AreaResponse;
+  if (!json.succ || !json.data) throw new Error(`Anue code ${json.code}: ${json.message ?? ""}`);
+  return json;
+}
+
+/** 逗號分隔的基金代碼字串 → 陣列（去空白、濾空）。 */
+export function parseFundIDs(csv: string | null | undefined): string[] {
+  return (csv ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/** 從回應的 data.condition.groups 取 InvestmentArea 的區域清單（不寫死）。 */
+export function parseAreaList(
+  data: { condition?: { groups?: AnueConditionGroup[] } } | null | undefined,
+): string[] {
+  const g = data?.condition?.groups?.find((x) => x.groupID === "InvestmentArea");
+  return (g?.parameters ?? []).map((p) => p.parameterValue).filter(Boolean);
+}
+
+/** 由各區域的 fundIDs 建立 fund_id → area 對照；一檔多區域取第一個並記 warning。 */
+export function buildAreaMap(
+  assignments: { area: string; fundIDs: string[] }[],
+): { areaOf: Map<string, string>; warnings: string[] } {
+  const areaOf = new Map<string, string>();
+  const warnings: string[] = [];
+  for (const { area, fundIDs } of assignments) {
+    for (const id of fundIDs) {
+      const existing = areaOf.get(id);
+      if (existing === undefined) areaOf.set(id, area);
+      else warnings.push(`${id} 同時屬於 ${existing} 與 ${area}，取前者`);
+    }
+  }
+  return { areaOf, warnings };
+}
+
+const AREA_PROBE = { desc: true, fundIDs: "", pageIndex: "1", pageSize: 1, sortColumnName: "fundID" };
+
+/**
+ * 建立全站 fund_id → 投資區域對照。
+ * 先以空 condition 取區域清單,再逐區以 pageSize:1 查 data.fundIDs。
+ * 單區查詢失敗記入 errors 不拋出（呼叫端據此決定是否更新區域欄）。
+ */
+export async function fetchInvestmentAreaMap(): Promise<{
+  areaOf: Map<string, string>;
+  warnings: string[];
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  const first = await post({ condition: [], ...AREA_PROBE });
+  const areas = parseAreaList(first.data);
+
+  const assignments: { area: string; fundIDs: string[] }[] = [];
+  for (const area of areas) {
+    try {
+      const r = await post({ condition: [{ groupID: "InvestmentArea", parameterValue: area }], ...AREA_PROBE });
+      assignments.push({ area, fundIDs: parseFundIDs(r.data!.fundIDs) });
+    } catch (e) {
+      errors.push(`${area}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const { areaOf, warnings } = buildAreaMap(assignments);
+  return { areaOf, warnings, errors };
+}
+
 export interface FundRecord {
   fund: {
     fund_id: string;

@@ -54,7 +54,7 @@ npm run deploy
 | --- | --- | --- |
 | POST | `/admin/ingest` | 手動觸發抓取（與 cron 同流程） |
 | GET | `/api/funds` | 清單；query：`group` `category` `currency` `rr` `domicile` `minSharpe3y` `maxStd1y` `sort`(sharpe_3y/std_1y/ret_3y/aum_twd) `order` `limit` `offset` |
-| GET | `/api/funds/:id` | 單檔基本資料 + 最新快照（含近 3 個月 `ret_3m`、6 個月 `ret_6m` 報酬） |
+| GET | `/api/funds/:id` | 單檔基本資料（含投資區域 `investment_area`）+ 最新快照（含近 3 個月 `ret_3m`、6 個月 `ret_6m` 報酬） |
 | GET | `/api/funds/:id/history` | 風險指標月歷史（cron 累積） |
 | GET | `/api/screen` | 快照初篩；query：`category`(必填) `currency` `minSharpePct`(50) `minDropPct`(40) `minWins`(3) `limit`(100)。依 (category,currency) 分組算 3Y 夏普／最差年度跌幅組內百分位與年度勝率,套三道門檻篩出 `passed`,並列 `rejected_count`、`insufficient` |
 | GET | `/api/meta/categories` | 基金組別清單與檔數 |
