@@ -30,6 +30,16 @@ describe("worker http surface", () => {
     expect(res.status).toBe(400);
   });
 
+  it("GET /api/screen weakWindows 含非法窗口回 400", async () => {
+    const res = await app.request("/api/screen?category=台灣股票&weakWindows=6m,2y");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/screen weakPct 超出 0–100 回 400", async () => {
+    const res = await app.request("/api/screen?category=台灣股票&weakPct=150");
+    expect(res.status).toBe(400);
+  });
+
   it("舊的 /api/analyze 已移除(404)", async () => {
     const res = await app.request("/api/analyze?category=台灣股票");
     expect(res.status).toBe(404);

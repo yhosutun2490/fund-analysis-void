@@ -70,7 +70,7 @@ const SCREEN_CTE = `
     SELECT fund_id, MAX(as_of) AS as_of FROM fund_risk GROUP BY fund_id
   )
   SELECT f.fund_id, f.name, f.category, f.currency, f.rr, r.as_of,
-         r.sharpe_3y, r.ret_1y,
+         r.sharpe_3y, r.ret_3m, r.ret_6m, r.ret_1y,
          r.roi_y1, r.roi_y2, r.roi_y3, r.roi_y4, r.roi_y5,
          r.maxdrop_y1, r.maxdrop_y2, r.maxdrop_y3, r.maxdrop_y4, r.maxdrop_y5
   FROM funds f

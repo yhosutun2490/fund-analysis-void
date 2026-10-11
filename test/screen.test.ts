@@ -21,6 +21,8 @@ function row(partial: Partial<ScreenRow>): ScreenRow {
     maxdrop_y3: null,
     maxdrop_y4: null,
     maxdrop_y5: null,
+    ret_3m: null,
+    ret_6m: null,
     ret_1y: null,
     ...partial,
   };
@@ -143,6 +145,56 @@ describe("screenGroup — 3.2 / 3.4 規則", () => {
     expect(d?.wins).toBe(5);
     expect(d?.win_years).toBe(5);
     expect(d?.sharpe_pct).toBe(100);
+  });
+
+  // 長期好(夏普最高、勝率高、跌幅最佳)故入選;近期報酬可調
+  function weakScenario(t: Partial<ScreenRow>): ScreenRow[] {
+    const T = complete("T", {
+      sharpe_3y: 10,
+      roi_y1: 99, roi_y2: 99, roi_y3: 99, roi_y4: 99, roi_y5: 99,
+      maxdrop_y1: -1, maxdrop_y2: -1, maxdrop_y3: -1, maxdrop_y4: -1, maxdrop_y5: -1,
+      ...t,
+    });
+    const others = ["O1", "O2", "O3", "O4"].map((id, i) =>
+      complete(id, { sharpe_3y: i + 1, ret_3m: 1, ret_6m: 100, ret_1y: 100 }),
+    );
+    return [T, ...others];
+  }
+  const t = (g: ReturnType<typeof screenGroup>) => g.passed.find((x) => x.fund_id === "T");
+
+  it("ladder:近期報酬組內百分位", () => {
+    const g = screenGroup(weakScenario({ ret_3m: 100, ret_6m: 1, ret_1y: 1 }), PARAMS);
+    expect(t(g)?.ladder.ret_3m_pct).toBe(100);
+    expect(t(g)?.ladder.ret_6m_pct).toBe(0);
+    expect(t(g)?.ladder.ret_1y_pct).toBe(0);
+  });
+
+  it("weak_flag=true:長期好且預設窗口(6M、1Y)皆落後", () => {
+    const g = screenGroup(weakScenario({ ret_3m: 100, ret_6m: 1, ret_1y: 1 }), PARAMS);
+    expect(t(g)?.weak_flag).toBe(true);
+    expect(t(g)?.reasons.some((r) => r.includes("6M") && r.includes("1Y"))).toBe(true);
+  });
+
+  it("weak_flag=false:近期強(6M、1Y 皆領先)", () => {
+    const g = screenGroup(weakScenario({ ret_3m: 1, ret_6m: 100, ret_1y: 100 }), PARAMS);
+    expect(t(g)?.weak_flag).toBe(false);
+  });
+
+  it("3M 預設不單獨觸發:只有 3M 落後、6M/1Y 領先 → false", () => {
+    const g = screenGroup(weakScenario({ ret_3m: 1, ret_6m: 100, ret_1y: 100 }), PARAMS);
+    expect(t(g)?.weak_flag).toBe(false);
+  });
+
+  it("weak_flag=null:指定窗口任一無資料", () => {
+    const g = screenGroup(weakScenario({ ret_3m: 100, ret_6m: 1, ret_1y: null }), PARAMS);
+    expect(t(g)?.weak_flag).toBeNull();
+    expect(t(g)?.ladder.ret_1y_pct).toBeNull();
+  });
+
+  it("weakWindows 可指定 3m:僅看 3M 窗口", () => {
+    const g = screenGroup(weakScenario({ ret_3m: 0, ret_6m: 100, ret_1y: 100 }), { ...PARAMS, weakWindows: ["3m"] });
+    // ret_3m 最低(0 < 其他 1) → pct 0 < 40,長期好 → weak_flag true
+    expect(t(g)?.weak_flag).toBe(true);
   });
 
   it("passed 依 sharpe_pct 由高到低排序", () => {
