@@ -5,3 +5,18 @@ ALTER TABLE fund_risk ADD COLUMN ret_6m REAL;  -- perF_6MMEJ 近6個月報酬(%)
 
 ALTER TABLE funds ADD COLUMN investment_area TEXT;  -- 投資區域（InvestmentArea 篩選反查）
 CREATE INDEX IF NOT EXISTS idx_funds_area ON funds(investment_area);
+
+-- 含息序列快取（回復分析）
+CREATE TABLE IF NOT EXISTS fund_series (
+  fund_id        TEXT PRIMARY KEY,
+  basis          TEXT NOT NULL,
+  series_start   TEXT NOT NULL,
+  series_end     TEXT NOT NULL,
+  points         TEXT NOT NULL,
+  fetched_at     TEXT NOT NULL,
+  mdd                    REAL,
+  mdd_recovered          INTEGER,
+  mdd_underwater_days    INTEGER,
+  still_underwater_ratio REAL,
+  loss_prob_1y           REAL
+);

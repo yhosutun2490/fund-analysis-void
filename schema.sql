@@ -56,6 +56,22 @@ CREATE TABLE IF NOT EXISTS fund_risk (
 );
 CREATE INDEX IF NOT EXISTS idx_risk_asof ON fund_risk(as_of);
 
+-- 含息累積報酬序列快取（一檔一列,回復分析用）
+CREATE TABLE IF NOT EXISTS fund_series (
+  fund_id        TEXT PRIMARY KEY,
+  basis          TEXT NOT NULL,          -- 'total_return'（含配息）
+  series_start   TEXT NOT NULL,
+  series_end     TEXT NOT NULL,
+  points         TEXT NOT NULL,          -- JSON [["YYYY-MM-DD", index], …]
+  fetched_at     TEXT NOT NULL,
+  -- 預設窗口（全期間）摘要,供 /api/screen 帶出（ticket 10 寫入）
+  mdd                    REAL,
+  mdd_recovered          INTEGER,
+  mdd_underwater_days    INTEGER,
+  still_underwater_ratio REAL,
+  loss_prob_1y           REAL
+);
+
 -- 每次抓取的紀錄（稽核用）
 CREATE TABLE IF NOT EXISTS ingest_runs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

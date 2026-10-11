@@ -21,6 +21,8 @@ POST /admin/ingest ─┴─▶ fetchAllFunds() ─▶ normalize(哨兵值→nul
 - `src/anue.ts`：抓取 + 正規化（`pageSize` 2000、3 頁抓完 4540 檔；`-99999999.9999` → null）
 - `src/db.ts`：D1 upsert（`funds` 覆蓋更新、`fund_risk` 以 `(fund_id, as_of)` 累積月快照）
 - `src/screen.ts`：快照初篩純計算（同組百分位、年度勝率、入選規則；描述性，非建議）
+- `src/anuePrice.ts`：鉅亨含息序列抓取（切塊、併發、串接）；`src/recovery.ts`：回撤／近期報酬純計算
+- `src/services/recovery.ts`：序列快取新鮮度 → 抓取／存檔 → 計算；`src/repositories/series.ts`：`fund_series` 讀寫
 - `src/index.ts`：Hono 路由 + `scheduled` cron handler
 - `schema.sql`：D1 schema
 
@@ -56,6 +58,7 @@ npm run deploy
 | GET | `/api/funds` | 清單；query：`group` `category` `currency` `rr` `domicile` `minSharpe3y` `maxStd1y` `sort`(sharpe_3y/std_1y/ret_3y/aum_twd) `order` `limit` `offset` |
 | GET | `/api/funds/:id` | 單檔基本資料（含投資區域 `investment_area`）+ 最新快照（含近 3 個月 `ret_3m`、6 個月 `ret_6m` 報酬） |
 | GET | `/api/funds/:id/history` | 風險指標月歷史（cron 累積） |
+| GET | `/api/funds/:id/recovery` | 回復分析；鉅亨含息序列(`PerformanceHIS`)的最大回撤 `mdd`(前高/谷底/回復日、回復天數、水下天數、未回復時距前高)與近期含息報酬 `recent`(3M/6M/1Y)。序列快取於 `fund_series`;新鮮用快取、否則整條重抓。比例/報酬皆為**小數**。未知基金 404、上游失敗無快取 502、有效點<60 回 `series_too_short` |
 | GET | `/api/screen` | 快照初篩；範圍篩選 `category` `area` `group` `domicile` `currency`(皆可多值逗號分隔、同參數 OR、跨參數 AND)`maxRr`(1–5)——`category`/`area`/`group` 至少擇一;規則參數 `minSharpePct`(50) `minDropPct`(40) `minWins`(3) `weakPct`(40) `weakWindows`(6m,1y) `limit`(100)。**篩選只決定回傳哪些基金,百分位永遠以完整 (category,currency) 組計算**。依組算 3Y 夏普／最差年度跌幅組內百分位與年度勝率,套三道門檻篩出 `passed`,列 `rejected_count`、`insufficient`;每組含 `peer_count`(完整組)、`matched_count`(篩選後);每檔附 `ladder`(3M/6M/1Y 報酬組內百分位)與 `weak_flag`(三態);頂層回 `filters` |
 | GET | `/api/meta/categories` | 基金組別清單與檔數 |
 | GET | `/api/meta/runs` | 近 20 次抓取紀錄 |
