@@ -78,13 +78,46 @@ const SCREEN_CTE = `
   JOIN fund_risk r ON r.fund_id = f.fund_id AND r.as_of = l.as_of
 `;
 
-/** 初篩：某 category（可選 currency）的完整組最新快照。 */
-export async function listScreenRows(db: D1Database, category: string, currency?: string): Promise<ScreenRow[]> {
-  const binds: unknown[] = [category];
-  let filter = "f.category = ?";
-  if (currency) { filter += " AND f.currency = ?"; binds.push(currency); }
-  const sql = `${SCREEN_CTE} WHERE ${filter}`;
+export interface ScreenFilters {
+  categories?: string[];
+  areas?: string[];
+  groups?: string[];
+  domiciles?: string[];
+  currencies?: string[];
+  maxRr?: number;
+}
+
+function inClause(col: string, vals: string[], binds: unknown[]): string {
+  binds.push(...vals);
+  return `${col} IN (${vals.map(() => "?").join(",")})`;
+}
+
+/** 符合範圍篩選的基金 key（決定命中組與 matched 集合;同參數 OR、跨參數 AND）。 */
+export async function listMatchedKeys(
+  db: D1Database,
+  f: ScreenFilters,
+): Promise<{ fund_id: string; category: string | null; currency: string | null }[]> {
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  if (f.categories?.length) where.push(inClause("category", f.categories, binds));
+  if (f.areas?.length) where.push(inClause("investment_area", f.areas, binds));
+  if (f.groups?.length) where.push(inClause("fund_group", f.groups, binds));
+  if (f.domiciles?.length) where.push(inClause("domicile", f.domiciles, binds));
+  if (f.currencies?.length) where.push(inClause("currency", f.currencies, binds));
+  if (f.maxRr !== undefined) {
+    const rrs = Array.from({ length: f.maxRr }, (_, i) => `RR${i + 1}`);
+    where.push(inClause("rr", rrs, binds));
+  }
+  const sql = `SELECT fund_id, category, currency FROM funds${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
   const { results } = await db.prepare(sql).bind(...binds).all();
+  return results as unknown as { fund_id: string; category: string | null; currency: string | null }[];
+}
+
+/** 指定 categories 的完整組最新快照（不套其他篩選,作為百分位基準）。 */
+export async function listFullGroups(db: D1Database, categories: string[]): Promise<ScreenRow[]> {
+  if (categories.length === 0) return [];
+  const sql = `${SCREEN_CTE} WHERE f.category IN (${categories.map(() => "?").join(",")})`;
+  const { results } = await db.prepare(sql).bind(...categories).all();
   return results as unknown as ScreenRow[];
 }
 

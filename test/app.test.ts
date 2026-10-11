@@ -4,6 +4,12 @@ import { app } from "../src/app";
 
 const client = testClient(app);
 
+// 空結果 D1:讓通過驗證的請求能跑到底(不連真 DB)
+const emptyDB = {
+  prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), first: async () => null }) }),
+} as unknown as D1Database;
+const env = { DB: emptyDB };
+
 describe("worker http surface", () => {
   it("GET / 回服務資訊(型別化回傳)", async () => {
     const res = await client.index.$get();
@@ -15,8 +21,18 @@ describe("worker http surface", () => {
     expect(body.disclaimer).toBeTruthy();
   });
 
-  it("GET /api/screen 缺 category 回 400", async () => {
+  it("GET /api/screen 缺 category/area/group 全無 回 400", async () => {
     const res = await app.request("/api/screen");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/screen 只給 area 也可(不回 400)", async () => {
+    const res = await app.request("/api/screen?area=亞洲", {}, env);
+    expect(res.status).toBe(200);
+  });
+
+  it("GET /api/screen maxRr 超出 1–5 回 400", async () => {
+    const res = await app.request("/api/screen?category=台灣股票&maxRr=9");
     expect(res.status).toBe(400);
   });
 

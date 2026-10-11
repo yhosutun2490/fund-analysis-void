@@ -197,6 +197,28 @@ describe("screenGroup — 3.2 / 3.4 規則", () => {
     expect(t(g)?.weak_flag).toBe(true);
   });
 
+  it("篩選(matchedIds)只決定回傳哪些檔,百分位/勝率/階梯以完整組計算", () => {
+    const rows = weakScenario({ ret_3m: 100, ret_6m: 1, ret_1y: 1 });
+    const full = screenGroup(rows, PARAMS);
+    const matched = screenGroup(rows, PARAMS, new Set(["T"]));
+
+    expect(matched.peer_count).toBe(full.peer_count); // 完整組樣本數不變
+    expect(matched.matched_count).toBe(1);
+    expect(matched.passed.map((x) => x.fund_id)).toEqual(["T"]);
+
+    const tFull = full.passed.find((x) => x.fund_id === "T")!;
+    const tMatched = matched.passed.find((x) => x.fund_id === "T")!;
+    expect(tMatched.sharpe_pct).toBe(tFull.sharpe_pct);
+    expect(tMatched.wins).toBe(tFull.wins);
+    expect(tMatched.ladder).toEqual(tFull.ladder);
+  });
+
+  it("未指定 matchedIds → matched_count = peer_count", () => {
+    const rows = weakScenario({ ret_3m: 100, ret_6m: 1, ret_1y: 1 });
+    const g = screenGroup(rows, PARAMS);
+    expect(g.matched_count).toBe(g.peer_count);
+  });
+
   it("passed 依 sharpe_pct 由高到低排序", () => {
     // 讓多檔入選:每檔報酬/跌幅都勝過一個墊底的
     const base = { roi_y1: 1, roi_y2: 1, roi_y3: 1, roi_y4: 1, roi_y5: 1, maxdrop_y1: -50, maxdrop_y2: -50, maxdrop_y3: -50, maxdrop_y4: -50, maxdrop_y5: -50, sharpe_3y: 0.1 };

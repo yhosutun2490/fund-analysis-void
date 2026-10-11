@@ -65,7 +65,8 @@ export interface InsufficientFund {
 export interface GroupResult {
   category: string | null;
   currency: string | null;
-  peer_count: number;
+  peer_count: number; // 完整組樣本數（不受篩選影響）
+  matched_count: number; // 篩選後屬於本組的檔數
   passed: PassedFund[];
   rejected_count: number;
   insufficient: InsufficientFund[];
@@ -109,11 +110,18 @@ function worstDrop(r: ScreenRow): number | null {
   return vals.length ? Math.min(...vals) : null;
 }
 
-/** 對單一 (category, currency) 組做初篩。 */
-export function screenGroup(rows: ScreenRow[], params: ScreenParams): GroupResult {
+/**
+ * 對單一 (category, currency) 組做初篩。
+ * 百分位、中位數一律以完整 `rows`（整組）計算；
+ * `matchedIds` 只決定輸出哪些檔（範圍篩選不改變比較基準）,未給則全組皆輸出。
+ */
+export function screenGroup(rows: ScreenRow[], params: ScreenParams, matchedIds?: Set<string>): GroupResult {
   const category = rows[0]?.category ?? null;
   const currency = rows[0]?.currency ?? null;
   const peer_count = rows.length;
+  const isMatched = (id: string) => (matchedIds ? matchedIds.has(id) : true);
+  const matched = rows.filter((r) => isMatched(r.fund_id));
+  const matched_count = matched.length;
 
   // 組太小：整組資料不足,不算百分位
   if (peer_count < MIN_PEER) {
@@ -121,9 +129,10 @@ export function screenGroup(rows: ScreenRow[], params: ScreenParams): GroupResul
       category,
       currency,
       peer_count,
+      matched_count,
       passed: [],
       rejected_count: 0,
-      insufficient: rows.map((r) => ({ fund_id: r.fund_id, name: r.name, reason: "peer_group_too_small" as const })),
+      insufficient: matched.map((r) => ({ fund_id: r.fund_id, name: r.name, reason: "peer_group_too_small" as const })),
     };
   }
 
@@ -144,6 +153,9 @@ export function screenGroup(rows: ScreenRow[], params: ScreenParams): GroupResul
   let rejected_count = 0;
 
   for (const r of rows) {
+    // 範圍篩選：只輸出命中的檔（百分位已以完整組算好,不受影響）
+    if (!isMatched(r.fund_id)) continue;
+
     // 規則 1：資料完整
     if (r.sharpe_3y == null) {
       insufficient.push({ fund_id: r.fund_id, name: r.name, reason: "missing_sharpe_3y" });
@@ -208,7 +220,7 @@ export function screenGroup(rows: ScreenRow[], params: ScreenParams): GroupResul
   // 規則 5：依 sharpe_pct 由高到低,同值依 worst_drop_pct
   passed.sort((a, b) => (b.sharpe_pct! - a.sharpe_pct!) || (b.worst_drop_pct! - a.worst_drop_pct!));
 
-  return { category, currency, peer_count, passed, rejected_count, insufficient };
+  return { category, currency, peer_count, matched_count, passed, rejected_count, insufficient };
 }
 
 const labelOf = (w: Window) => ({ "3m": "3M", "6m": "6M", "1y": "1Y" })[w];
@@ -235,11 +247,13 @@ function buildReasons(sharpePct: number, dropPct: number | null, wins: number, w
 }
 
 /** 依 (category, currency) 分組,各組套 screenGroup。 */
-export function screenGroups(rows: ScreenRow[], params: ScreenParams): GroupResult[] {
+export function screenGroups(rows: ScreenRow[], params: ScreenParams, matchedIds?: Set<string>): GroupResult[] {
   const groups = new Map<string, ScreenRow[]>();
   for (const r of rows) {
     const key = `${r.category ?? ""} ${r.currency ?? ""}`;
     (groups.get(key) ?? groups.set(key, []).get(key)!).push(r);
   }
-  return [...groups.values()].map((g) => screenGroup(g, params));
+  return [...groups.values()]
+    .map((g) => screenGroup(g, params, matchedIds))
+    .filter((g) => g.matched_count > 0);
 }

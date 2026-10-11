@@ -12,7 +12,7 @@ export const root = new Hono<{ Bindings: Env }>().get("/", (c) =>
       "GET  /api/funds?group=&category=&currency=&rr=&domicile=&minSharpe3y=&maxStd1y=&sort=sharpe_3y&order=desc&limit=50&offset=0",
       "GET  /api/funds/:id",
       "GET  /api/funds/:id/history",
-      "GET  /api/screen?category=台灣股票&currency=TWD&minSharpePct=50&minDropPct=40&minWins=3&weakPct=40&weakWindows=6m,1y&limit=100",
+      "GET  /api/screen?category=台灣股票&area=亞洲&group=股票型&domicile=offshore&currency=TWD&maxRr=3&minSharpePct=50&minDropPct=40&minWins=3&weakPct=40&weakWindows=6m,1y&limit=100",
       "GET  /api/meta/categories",
       "GET  /api/meta/runs",
     ],
