@@ -5,6 +5,5 @@ dist/
 *.log
 .DS_Store
 
-# 進入點重構 spec/plan（本機參考,不入庫）
-docs/superpowers/specs/2026-10-10-worker-entrypoint-registration-refactor.md
-docs/superpowers/plans/2026-10-10-worker-entrypoint-registration-refactor.md
+# docs 為本機參考,不入庫
+docs/
