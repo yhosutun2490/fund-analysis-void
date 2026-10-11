@@ -72,6 +72,8 @@ describe("GET /api/funds/:id/recovery — 錯誤處理", () => {
     expect(body.series.stale).toBe(false);
     expect(Array.isArray(body.episodes)).toBe(true);
     expect(body.events).toHaveProperty("covid_2020");
+    expect(body.lump_sum).toHaveProperty("still_underwater_ratio");
+    expect(body.lump_sum.holding).toHaveProperty("1y");
     expect(body.window).toHaveProperty("from");
     expect(saveSeries).toHaveBeenCalledOnce();
   });

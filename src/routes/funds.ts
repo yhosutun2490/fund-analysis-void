@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { DISCLAIMER } from "../disclaimer";
 import type { Env } from "../env";
-import { computeEpisodes, computeEvents, computeMdd, recentReturns, sliceWindow } from "../recovery";
+import { computeEpisodes, computeEvents, computeLumpSum, computeMdd, recentReturns, sliceWindow } from "../recovery";
 import { getFund, getLatestRisk, getRiskHistory, listFunds } from "../repositories/funds";
 import { loadSeries, UpstreamUnavailable } from "../services/recovery";
 
@@ -80,6 +80,7 @@ funds.get("/:id/recovery", async (c) => {
     mdd: tooShort ? null : computeMdd(win),
     episodes: tooShort ? [] : computeEpisodes(win, minDepth),
     events: tooShort ? {} : computeEvents(win),
+    lump_sum: tooShort ? null : computeLumpSum(win),
     recent: tooShort ? null : recentReturns(win),
     ...(tooShort ? { reason: "series_too_short" } : {}),
     ...(data.warning ? { warning: data.warning } : {}),

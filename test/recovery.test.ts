@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeEpisodes,
   computeEvents,
+  computeLumpSum,
   computeMdd,
   recentReturns,
   type SeriesPoint,
@@ -153,5 +154,45 @@ describe("computeEvents — 預設事件覆蓋判斷", () => {
     ];
     const ev = computeEvents(pts);
     expect((ev.covid_2020 as any).reason).toBe("not_covered");
+  });
+});
+
+describe("computeLumpSum — 單筆進場", () => {
+  it("全程上漲:仍虧損比例 0、最長水下 0", () => {
+    const pts: SeriesPoint[] = [
+      ["2020-01-01", 100],
+      ["2020-06-01", 110],
+      ["2021-01-01", 120],
+    ];
+    const ls = computeLumpSum(pts);
+    expect(ls.still_underwater_ratio).toBe(0);
+    expect(ls.longest_underwater_days).toBe(0);
+    expect(ls.longest_underwater_open).toBe(false);
+  });
+
+  it("未回本開放區間:最長水下標 open、附進場日", () => {
+    const pts: SeriesPoint[] = [
+      ["2020-01-01", 100],
+      ["2020-06-01", 120],
+      ["2021-01-01", 80], // 自 120 進場後未回本
+    ];
+    const ls = computeLumpSum(pts);
+    expect(ls.still_underwater_ratio).toBeCloseTo(2 / 3, 10);
+    expect(ls.longest_underwater_open).toBe(true);
+    expect(ls.longest_underwater_entry).toBe("2020-06-01");
+  });
+
+  it("持有:1y loss_prob/worst/median;3y 窗口不足 → reason", () => {
+    const pts: SeriesPoint[] = [
+      ["2020-01-01", 100],
+      ["2021-01-01", 90],
+      ["2022-01-01", 130],
+    ];
+    const ls = computeLumpSum(pts);
+    const h1 = ls.holding["1y"] as any;
+    expect(h1.loss_prob).toBeCloseTo(0.5, 10);
+    expect(h1.worst).toBeCloseTo(-0.1, 10);
+    expect(h1.median).toBeCloseTo(0.17, 2);
+    expect((ls.holding["3y"] as any).reason).toBe("window_shorter_than_horizon");
   });
 });

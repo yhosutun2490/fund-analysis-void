@@ -204,6 +204,113 @@ function monthsBefore(dateStr: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+export type Holding = { loss_prob: number; worst: number; median: number } | { reason: "window_shorter_than_horizon" };
+
+export interface LumpSum {
+  still_underwater_ratio: number | null;
+  longest_underwater_days: number | null;
+  longest_underwater_entry: string | null;
+  longest_underwater_open: boolean;
+  holding: { "1y": Holding; "3y": Holding };
+}
+
+function addDays(dateStr: string, n: number): string {
+  return new Date(Date.parse(`${dateStr}T00:00:00Z`) + n * MS_PER_DAY).toISOString().slice(0, 10);
+}
+
+/** 每個 index 右側第一個值 ≥ 自身的 index（單調堆疊,O(n)）;無則 -1。 */
+function nextGreaterEqual(points: SeriesPoint[]): number[] {
+  const n = points.length;
+  const out = new Array<number>(n).fill(-1);
+  const stack: number[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    while (stack.length && points[stack[stack.length - 1]][1] < points[i][1]) stack.pop();
+    out[i] = stack.length ? stack[stack.length - 1] : -1;
+    stack.push(i);
+  }
+  return out;
+}
+
+const medianOf = (xs: number[]): number => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+/** 某持有期 H（日曆日）的虧損機率/最差/中位;窗口不足 H → reason。 */
+function holdingStats(points: SeriesPoint[], horizonDays: number): Holding {
+  const first = points[0][0];
+  const last = points[points.length - 1][0];
+  if (daysBetween(first, last) < horizonDays) return { reason: "window_shorter_than_horizon" };
+
+  const rets: number[] = [];
+  for (const [date, entryVal] of points) {
+    const target = addDays(date, horizonDays);
+    const end = valueAtOrAfter(points, target);
+    if (end == null) continue; // 進場日太近窗口尾端,無期末資料
+    rets.push(end / entryVal - 1);
+  }
+  if (rets.length === 0) return { reason: "window_shorter_than_horizon" };
+  const losses = rets.filter((r) => r < 0).length;
+  return { loss_prob: losses / rets.length, worst: Math.min(...rets), median: medianOf(rets) };
+}
+
+/** 單筆進場風險：仍虧損比例、最長回本天數、持有期虧損機率。 */
+export function computeLumpSum(points: SeriesPoint[]): LumpSum {
+  const empty: LumpSum = {
+    still_underwater_ratio: null, longest_underwater_days: null,
+    longest_underwater_entry: null, longest_underwater_open: false,
+    holding: { "1y": { reason: "window_shorter_than_horizon" }, "3y": { reason: "window_shorter_than_horizon" } },
+  };
+  if (points.length < 2) return empty;
+
+  const n = points.length;
+  const lastVal = points[n - 1][1];
+  const lastDate = points[n - 1][0];
+
+  // 仍虧損比例：進場後至今 I_last < I_e
+  let under = 0;
+  for (const [, v] of points) if (lastVal < v) under++;
+  const still_underwater_ratio = under / n;
+
+  // 最長回本天數（以「下一個 ≥」求回本日;未回本算到最後日並標 open）
+  const nge = nextGreaterEqual(points);
+  let longest = 0;
+  let entry: string | null = points[0][0];
+  let open = false;
+  for (let e = 0; e < n; e++) {
+    let dur: number;
+    let isOpen = false;
+    if (e === n - 1 || nge[e] === e + 1) {
+      dur = 0; // 下一點即回本 → 未進入水下
+    } else if (nge[e] < 0) {
+      dur = daysBetween(points[e][0], lastDate);
+      isOpen = true;
+    } else {
+      dur = daysBetween(points[e][0], points[nge[e]][0]);
+    }
+    if (dur > longest) {
+      longest = dur;
+      entry = points[e][0];
+      open = isOpen;
+    }
+  }
+
+  return {
+    still_underwater_ratio,
+    longest_underwater_days: longest,
+    longest_underwater_entry: entry,
+    longest_underwater_open: open,
+    holding: { "1y": holdingStats(points, 365), "3y": holdingStats(points, 1095) },
+  };
+}
+
+/** points 中日期 ≥ target 的第一點值;無則 null。 */
+function valueAtOrAfter(points: SeriesPoint[], target: string): number | null {
+  for (const [date, v] of points) if (date >= target) return v;
+  return null;
+}
+
 /** points 中日期 ≤ target 的最後一點值;無則 null。 */
 function valueAtOrBefore(points: SeriesPoint[], target: string): number | null {
   let out: number | null = null;
