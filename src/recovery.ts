@@ -80,6 +80,115 @@ export function computeMdd(points: SeriesPoint[]): Drawdown {
   };
 }
 
+/** 取窗口 [from, to]（含端點）;未給則回全序列。points 須升序。 */
+export function sliceWindow(points: SeriesPoint[], from?: string, to?: string): SeriesPoint[] {
+  return points.filter(([d]) => (from ? d >= from : true) && (to ? d <= to : true));
+}
+
+/** 由前高/谷底/回復索引組一筆回撤（recoveryIdx < 0 表示未回復,算到最後日）。 */
+function episodeOf(points: SeriesPoint[], peakIdx: number, troughIdx: number, recoveryIdx: number): Drawdown {
+  const peakVal = points[peakIdx][1];
+  const peak = points[peakIdx][0];
+  const trough = points[troughIdx][0];
+  const depth = points[troughIdx][1] / peakVal - 1;
+  if (recoveryIdx < 0) {
+    const lastDate = points[points.length - 1][0];
+    return {
+      depth, peak, trough, recovery: null, recovered: false,
+      recovery_days: null, underwater_days: daysBetween(peak, lastDate),
+      gap_to_peak: points[points.length - 1][1] / peakVal - 1,
+    };
+  }
+  const recovery = points[recoveryIdx][0];
+  return {
+    depth, peak, trough, recovery, recovered: true,
+    recovery_days: daysBetween(trough, recovery),
+    underwater_days: daysBetween(peak, recovery),
+    gap_to_peak: null,
+  };
+}
+
+/**
+ * 回撤事件清單：把序列切成「前高 → 回到前高」的水下區段,
+ * 取最深跌幅 ≥ minDepth(%) 者,依深度排序（最深在前）。
+ */
+export function computeEpisodes(points: SeriesPoint[], minDepthPct: number): Drawdown[] {
+  const episodes: Drawdown[] = [];
+  if (points.length < 2) return episodes;
+
+  let peakIdx = 0;
+  let troughIdx = -1; // 自上次前高以來的最深點
+  for (let i = 1; i < points.length; i++) {
+    const v = points[i][1];
+    if (v >= points[peakIdx][1]) {
+      if (troughIdx >= 0) episodes.push(episodeOf(points, peakIdx, troughIdx, i));
+      peakIdx = i;
+      troughIdx = -1;
+    } else if (troughIdx < 0 || v < points[troughIdx][1]) {
+      troughIdx = i;
+    }
+  }
+  if (troughIdx >= 0) episodes.push(episodeOf(points, peakIdx, troughIdx, -1)); // 開放區段
+
+  const threshold = -minDepthPct / 100;
+  return episodes.filter((e) => (e.depth ?? 0) <= threshold).sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
+}
+
+export interface EventDef {
+  key: string;
+  start: string;
+  end: string;
+}
+
+export const DEFAULT_EVENTS: EventDef[] = [
+  { key: "covid_2020", start: "2020-01-01", end: "2020-06-30" },
+  { key: "rate_hike_2022", start: "2022-01-01", end: "2022-12-31" },
+  { key: "tariff_2025", start: "2025-03-01", end: "2025-05-31" },
+];
+
+export type EventResult = Drawdown | { reason: "not_covered" };
+
+/**
+ * 預設事件回撤：peak/trough 限事件區間內（peak 為谷底前區間內最高點）,
+ * recovery 往後找到序列結束;窗口未完整覆蓋事件區間 → { reason: "not_covered" }。
+ */
+export function computeEvents(points: SeriesPoint[], events: EventDef[] = DEFAULT_EVENTS): Record<string, EventResult> {
+  const out: Record<string, EventResult> = {};
+  const first = points[0]?.[0];
+  const last = points[points.length - 1]?.[0];
+
+  for (const ev of events) {
+    if (!first || !last || first > ev.start || last < ev.end) {
+      out[ev.key] = { reason: "not_covered" };
+      continue;
+    }
+    const inRange: number[] = [];
+    for (let i = 0; i < points.length; i++) {
+      if (points[i][0] >= ev.start && points[i][0] <= ev.end) inRange.push(i);
+    }
+    if (inRange.length < 2) {
+      out[ev.key] = { reason: "not_covered" };
+      continue;
+    }
+    // 區間內谷底,及其之前的區間內最高點
+    let troughIdx = inRange[0];
+    for (const i of inRange) if (points[i][1] < points[troughIdx][1]) troughIdx = i;
+    let peakIdx = inRange[0];
+    for (const i of inRange) {
+      if (i > troughIdx) break;
+      if (points[i][1] > points[peakIdx][1]) peakIdx = i;
+    }
+    // recovery 往後找（不限區間）
+    const peakVal = points[peakIdx][1];
+    let recoveryIdx = -1;
+    for (let i = troughIdx + 1; i < points.length; i++) {
+      if (points[i][1] >= peakVal) { recoveryIdx = i; break; }
+    }
+    out[ev.key] = episodeOf(points, peakIdx, troughIdx, recoveryIdx);
+  }
+  return out;
+}
+
 export interface RecentReturns {
   ret_3m: number | null;
   ret_6m: number | null;

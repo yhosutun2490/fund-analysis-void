@@ -60,7 +60,7 @@ describe("GET /api/funds/:id/recovery — 錯誤處理", () => {
     expect(body.reason).toBe("series_too_short");
   });
 
-  it("抓取成功(≥60 點) → 200,mdd/recent 有值,寫入快取", async () => {
+  it("抓取成功(≥60 點) → 200,mdd/recent/episodes/events 有值,寫入快取", async () => {
     vi.mocked(getFund).mockResolvedValue({ fund_id: "B3", name: "f", currency: "USD", setup_date: "2015-01-01" } as never);
     vi.mocked(getSeries).mockResolvedValue(null as never);
     vi.mocked(fetchTotalReturnSeries).mockResolvedValue(series(70));
@@ -70,7 +70,22 @@ describe("GET /api/funds/:id/recovery — 錯誤處理", () => {
     expect(typeof body.mdd.depth).toBe("number");
     expect(body.mdd.depth).toBeLessThan(0);
     expect(body.series.stale).toBe(false);
+    expect(Array.isArray(body.episodes)).toBe(true);
+    expect(body.events).toHaveProperty("covid_2020");
+    expect(body.window).toHaveProperty("from");
     expect(saveSeries).toHaveBeenCalledOnce();
+  });
+
+  it("minDepth 不在 (0,100) → 400", async () => {
+    vi.mocked(getFund).mockResolvedValue({ fund_id: "B5", name: "f", setup_date: "2015-01-01" } as never);
+    expect((await req("/api/funds/B5/recovery?minDepth=0")).status).toBe(400);
+    expect((await req("/api/funds/B5/recovery?minDepth=150")).status).toBe(400);
+  });
+
+  it("from > to 或日期格式錯 → 400", async () => {
+    vi.mocked(getFund).mockResolvedValue({ fund_id: "B6", name: "f", setup_date: "2015-01-01" } as never);
+    expect((await req("/api/funds/B6/recovery?from=2026-01-01&to=2020-01-01")).status).toBe(400);
+    expect((await req("/api/funds/B6/recovery?from=2026%2F01%2F01")).status).toBe(400);
   });
 
   it("上游失敗但有快取 → 200,stale:true + warning", async () => {

@@ -1,13 +1,14 @@
 import { Hono } from "hono";
 import { DISCLAIMER } from "../disclaimer";
 import type { Env } from "../env";
-import { computeMdd, recentReturns } from "../recovery";
+import { computeEpisodes, computeEvents, computeMdd, recentReturns, sliceWindow } from "../recovery";
 import { getFund, getLatestRisk, getRiskHistory, listFunds } from "../repositories/funds";
 import { loadSeries, UpstreamUnavailable } from "../services/recovery";
 
 export const funds = new Hono<{ Bindings: Env }>();
 
 const MIN_POINTS = 60;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // 基金清單 + 篩選 + 排序（以最新快照）
 funds.get("/", async (c) => {
@@ -45,6 +46,17 @@ funds.get("/:id/recovery", async (c) => {
   const fund = (await getFund(c.env.DB, id)) as { fund_id: string; name?: string; currency?: string; setup_date?: string | null } | null;
   if (!fund) return c.json({ error: "not found" }, 404);
 
+  // 參數：from/to 分析窗口、minDepth 回撤事件門檻
+  const q = c.req.query();
+  const { from, to } = q;
+  if (from !== undefined && !DATE_RE.test(from)) return c.json({ error: "from 須為 YYYY-MM-DD" }, 400);
+  if (to !== undefined && !DATE_RE.test(to)) return c.json({ error: "to 須為 YYYY-MM-DD" }, 400);
+  if (from && to && from > to) return c.json({ error: "from 不可晚於 to" }, 400);
+  const minDepth = q.minDepth === undefined ? 10 : Number(q.minDepth);
+  if (!Number.isFinite(minDepth) || minDepth <= 0 || minDepth >= 100) {
+    return c.json({ error: "minDepth 須在 (0,100)" }, 400);
+  }
+
   let data;
   try {
     data = await loadSeries(c.env, fund);
@@ -53,7 +65,9 @@ funds.get("/:id/recovery", async (c) => {
     throw e;
   }
 
-  const n = data.points.length;
+  // 窗口內重新起算（指標以窗口子序列計）
+  const win = sliceWindow(data.points, from, to);
+  const n = win.length;
   const tooShort = n < MIN_POINTS;
   return c.json({
     fund_id: id,
@@ -61,10 +75,12 @@ funds.get("/:id/recovery", async (c) => {
     currency: fund.currency ?? null,
     basis: "total_return",
     source: "anue FundDetail/Price PerformanceHIS",
-    series: { start: data.start, end: data.end, points: n, fetched_at: data.fetched_at, stale: data.stale },
-    window: { from: data.points[0]?.[0] ?? data.start, to: data.points[n - 1]?.[0] ?? data.end },
-    mdd: tooShort ? null : computeMdd(data.points),
-    recent: tooShort ? null : recentReturns(data.points),
+    series: { start: data.start, end: data.end, points: data.points.length, fetched_at: data.fetched_at, stale: data.stale },
+    window: { from: win[0]?.[0] ?? from ?? data.start, to: win[n - 1]?.[0] ?? to ?? data.end },
+    mdd: tooShort ? null : computeMdd(win),
+    episodes: tooShort ? [] : computeEpisodes(win, minDepth),
+    events: tooShort ? {} : computeEvents(win),
+    recent: tooShort ? null : recentReturns(win),
     ...(tooShort ? { reason: "series_too_short" } : {}),
     ...(data.warning ? { warning: data.warning } : {}),
     disclaimer: DISCLAIMER,

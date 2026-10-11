@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { computeMdd, recentReturns, type SeriesPoint } from "../src/recovery";
+import {
+  computeEpisodes,
+  computeEvents,
+  computeMdd,
+  recentReturns,
+  type SeriesPoint,
+  sliceWindow,
+} from "../src/recovery";
 
 describe("computeMdd — 已回復", () => {
   const points: SeriesPoint[] = [
@@ -74,5 +81,77 @@ describe("recentReturns", () => {
     const s = recentReturns(short);
     expect(s.ret_3m).toBeNull();
     expect(s.ret_1y).toBeNull();
+  });
+});
+
+describe("sliceWindow", () => {
+  const pts: SeriesPoint[] = [
+    ["2020-01-01", 1],
+    ["2021-01-01", 2],
+    ["2022-01-01", 3],
+    ["2023-01-01", 4],
+  ];
+  it("取 [from,to] 範圍(含端點)", () => {
+    expect(sliceWindow(pts, "2021-01-01", "2022-01-01").map((p) => p[0])).toEqual([
+      "2021-01-01",
+      "2022-01-01",
+    ]);
+  });
+  it("未給則全序列", () => {
+    expect(sliceWindow(pts)).toHaveLength(4);
+  });
+});
+
+describe("computeEpisodes — 水下區段切分與 minDepth", () => {
+  const pts: SeriesPoint[] = [
+    ["2020-01-01", 100],
+    ["2020-02-01", 80], // -20% 區段
+    ["2020-03-01", 100], // 回到前高
+    ["2020-04-01", 120], // 新高
+    ["2020-05-01", 90], // -25% 區段(未回復,開放)
+  ];
+
+  it("依深度排序、最深在前;開放區段 recovered=false", () => {
+    const eps = computeEpisodes(pts, 10);
+    expect(eps).toHaveLength(2);
+    expect(eps[0].depth).toBeCloseTo(-0.25, 10);
+    expect(eps[0].recovered).toBe(false);
+    expect(eps[0].recovery).toBeNull();
+    expect(eps[1].depth).toBeCloseTo(-0.2, 10);
+    expect(eps[1].recovered).toBe(true);
+    expect(eps[1].recovery).toBe("2020-03-01");
+  });
+
+  it("minDepth 門檻濾掉淺的區段", () => {
+    const eps = computeEpisodes(pts, 22);
+    expect(eps).toHaveLength(1);
+    expect(eps[0].depth).toBeCloseTo(-0.25, 10);
+  });
+});
+
+describe("computeEvents — 預設事件覆蓋判斷", () => {
+  it("窗口完整覆蓋 → peak/trough 限區間內、recovery 往後找", () => {
+    const pts: SeriesPoint[] = [
+      ["2019-12-01", 100],
+      ["2020-02-01", 100],
+      ["2020-03-15", 70],
+      ["2020-06-01", 90],
+      ["2026-01-01", 110],
+    ];
+    const ev = computeEvents(pts);
+    const covid = ev.covid_2020 as any;
+    expect(covid.depth).toBeCloseTo(-0.3, 10);
+    expect(covid.trough).toBe("2020-03-15");
+    expect(covid.recovered).toBe(true);
+    expect(covid.recovery).toBe("2026-01-01");
+  });
+
+  it("窗口未覆蓋事件區間 → null + reason not_covered", () => {
+    const pts: SeriesPoint[] = [
+      ["2021-01-01", 100],
+      ["2026-01-01", 110],
+    ];
+    const ev = computeEvents(pts);
+    expect((ev.covid_2020 as any).reason).toBe("not_covered");
   });
 });
