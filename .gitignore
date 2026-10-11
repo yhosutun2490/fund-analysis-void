@@ -7,3 +7,6 @@ dist/
 
 # docs 為本機參考,不入庫
 docs/
+
+# .scratch 為本機暫存,不入庫
+.scratch/
