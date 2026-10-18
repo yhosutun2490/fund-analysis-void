@@ -1,5 +1,5 @@
 import { fetchAllFunds, fetchInvestmentAreaMap, normalize } from "../anue";
-import type { Env } from "../env";
+import type { Env } from "../bindings";
 import { recordRun, updateInvestmentAreas, upsertRecords } from "../repositories/ingest";
 
 /**

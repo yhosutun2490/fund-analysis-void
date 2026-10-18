@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Env } from "../env";
+import type { Env } from "../bindings";
 import { listCategories } from "../repositories/funds";
 import { listRuns } from "../repositories/ingest";
 

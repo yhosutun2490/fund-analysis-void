@@ -10,3 +10,7 @@ docs/
 
 # .scratch 為本機暫存,不入庫
 .scratch/
+.void-wrangler.jsonc
+
+# Void 產生的型別與本機狀態
+.void/

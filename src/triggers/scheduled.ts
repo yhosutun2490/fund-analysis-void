@@ -1,4 +1,4 @@
-import type { Env } from "../env";
+import type { Env } from "../bindings";
 import { runIngest } from "../services/ingest";
 
 /** Cron Trigger：與手動 /admin/ingest 共用 runIngest 流程 */

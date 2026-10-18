@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Env } from "../env";
+import type { Env } from "../bindings";
 import { runIngest } from "../services/ingest";
 
 export const admin = new Hono<{ Bindings: Env }>();

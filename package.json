@@ -4,16 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "wrangler d1 migrations apply fund_risks --local",
-    "db:migrate:remote": "wrangler d1 migrations apply fund_risks --remote",
-    "ingest:local": "curl -s -X POST http://localhost:8787/admin/ingest | tail -1",
+    "dev": "vite dev",
+    "deploy": "void deploy",
+    "db:generate": "void db generate",
+    "db:migrate": "void db migrate",
+    "db:migrate:remote": "void db migrate --remote",
+    "ingest:local": "curl -s -X POST http://localhost:5173/admin/ingest | tail -1",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "husky"
+    "prepare": "husky",
+    "build": "vite build"
   },
   "dependencies": {
     "hono": "^4.6.14"
@@ -26,7 +27,10 @@
     "drizzle-orm": "^0.45.4",
     "husky": "^9.1.7",
     "typescript": "^5.7.2",
+    "vite": "^8.3.4",
     "vitest": "^5.0.3",
-    "wrangler": "^4.0.0"
+    "void": "^1.1.11",
+    "wrangler": "^4.0.0",
+    "zod": "^4.6.7"
   }
 }

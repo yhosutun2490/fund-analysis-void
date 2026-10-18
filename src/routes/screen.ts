@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { DISCLAIMER } from "../disclaimer";
-import type { Env } from "../env";
+import type { Env } from "../bindings";
 import { listFullGroups, listMatchedKeys, type ScreenFilters } from "../repositories/funds";
 import { screenGroups, type Window } from "../screen";
 

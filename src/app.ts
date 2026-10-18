@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import type { Env } from "./env";
+import type { Env } from "./bindings";
 import { admin } from "./routes/admin";
 import { funds } from "./routes/funds";
 import { meta } from "./routes/meta";

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { DISCLAIMER } from "../disclaimer";
-import type { Env } from "../env";
+import type { Env } from "../bindings";
 import { computeEpisodes, computeEvents, computeLumpSum, computeMdd, recentReturns, sliceWindow } from "../recovery";
 import { getFund, getLatestRisk, getRiskHistory, listFunds } from "../repositories/funds";
 import { loadSeries, UpstreamUnavailable } from "../services/recovery";
