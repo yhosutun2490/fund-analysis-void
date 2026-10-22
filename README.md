@@ -48,6 +48,11 @@ curl -X POST http://localhost:8787/admin/ingest   # 手動抓一次
 npm run deploy
 ```
 
+### Secrets / 環境變數
+
+- `DISCORD_WEBHOOK_URL`（secret,選用）：cron ingest **失敗**（🔴）或**成功但帶 warning**（🟡,如鉅亨新增欄位、投資區域警告）時發 Discord 通知;乾淨成功不送。未設定即停用。
+  線上以 `npx wrangler secret put DISCORD_WEBHOOK_URL --name fund-risks-analysis` 設定,本機寫在 `.dev.vars`（已 gitignore）;不要寫進 `void.config.ts` 的 `vars`。
+
 ## 端點
 
 | 方法 | 路徑 | 說明 |
