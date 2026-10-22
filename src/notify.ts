@@ -22,6 +22,12 @@ export function ingestFailureMessage(e: unknown): string {
   return `🔴 ${SERVICE} cron ingest 失敗\nstatus: error\n${e instanceof Error ? e.message : String(e)}`;
 }
 
+/** 截到 Discord 上限;若切在代理對中間（如 emoji）則再退一格。 */
+function truncate(s: string): string {
+  const cut = s.slice(0, DISCORD_LIMIT);
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
 /** POST 到 Discord webhook。未設定 → 安靜略過;任何失敗只記 log,絕不拋出。 */
 export async function notifyDiscord(webhookUrl: string | undefined, content: string): Promise<void> {
   if (!webhookUrl) return;
@@ -29,7 +35,7 @@ export async function notifyDiscord(webhookUrl: string | undefined, content: str
     const res = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: content.slice(0, DISCORD_LIMIT) }),
+      body: JSON.stringify({ content: truncate(content) }),
     });
     if (!res.ok) console.error("discord notify failed", res.status);
   } catch (e) {

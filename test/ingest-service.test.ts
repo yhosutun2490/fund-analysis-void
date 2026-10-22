@@ -19,7 +19,7 @@ import { runIngest } from "../src/services/ingest";
 const env = { DB: {} as D1Database } as never;
 
 const cleanFetch = { rows: [], dataTime: "2026-10-11", dataCount: 0, warnings: [] };
-const cleanAreas = { areaOf: new Map<string, string>(), warnings: [], errors: [] };
+const cleanAreas = { areaOf: new Map<string, string>(), warnings: [], errors: [], upstreamWarnings: [] };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -32,6 +32,7 @@ describe("runIngest — 投資區域整合", () => {
       areaOf: new Map([["A01", "亞洲"]]),
       warnings: [],
       errors: [],
+      upstreamWarnings: [],
     });
     await runIngest(env);
     expect(updateInvestmentAreas).toHaveBeenCalledOnce();
@@ -43,6 +44,7 @@ describe("runIngest — 投資區域整合", () => {
       areaOf: new Map([["A01", "亞洲"]]),
       warnings: [],
       errors: ["歐洲: Anue code 00999"],
+      upstreamWarnings: [],
     });
     const r = await runIngest(env);
     expect(updateInvestmentAreas).not.toHaveBeenCalled();
@@ -80,6 +82,15 @@ describe("runIngest — 鉅亨契約變動", () => {
     expect(run.note).toContain("data.fundDatas[].brandNew");
     expect(run.note).toContain("投資區域警告");
     expect(r.note).toBe(run.note);
+  });
+
+  it("區域查詢的加性 warning 即使區域部分失敗也保留,且不標成投資區域警告", async () => {
+    const upstream = "鉅亨 Search/Detail 出現未知欄位（加性變動）: data.condition.groups[].brandNew";
+    vi.mocked(fetchInvestmentAreaMap).mockResolvedValue({ ...cleanAreas, errors: ["歐洲: Anue code 00999"], upstreamWarnings: [upstream] });
+    await runIngest(env);
+    const notes = vi.mocked(recordRun).mock.calls[0][1].note!.split("; ");
+    expect(notes).toContain(upstream);
+    expect(notes.some((n) => n.startsWith("投資區域部分失敗"))).toBe(true);
   });
 
   it("乾淨成功 → note 為空", async () => {

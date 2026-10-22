@@ -18,12 +18,14 @@ const group = (groupID: string, values: string[]) => ({
 
 describe("parseAreaList — 取自 condition.groups,不寫死", () => {
   it("擷取 InvestmentArea 的 values[].value 清單", () => {
-    const data = { condition: { groups: [group("AssetType", ["股票型"]), group("InvestmentArea", ["全球", "亞洲"])] } };
-    expect(parseAreaList(data)).toEqual(["全球", "亞洲"]);
+    expect(parseAreaList([group("AssetType", ["股票型"]), group("InvestmentArea", ["全球", "亞洲"])]).areas).toEqual(["全球", "亞洲"]);
   });
-  it("找不到 InvestmentArea → []", () => {
-    expect(parseAreaList({ condition: { groups: [] } })).toEqual([]);
-    expect(parseAreaList(null)).toEqual([]);
+  it("其他篩選維度的結構不影響(只釘 InvestmentArea)", () => {
+    const odd = { groupID: "DivFreq", values: [{ value: 12 }] };
+    expect(parseAreaList([odd, group("InvestmentArea", ["亞洲"])]).areas).toEqual(["亞洲"]);
+  });
+  it("找不到 InvestmentArea 群組 → 格式錯誤(不再默默當成 0 個區域)", () => {
+    expect(() => parseAreaList([group("AssetType", ["股票型"])])).toThrow(/格式不符.*InvestmentArea/);
   });
 });
 
@@ -87,7 +89,7 @@ describe("fetchInvestmentAreaMap — 上游契約驗證", () => {
 
   it("區域清單結構改變(values[].value 改型別) → 丟出點名路徑的格式錯誤", async () => {
     stubAnue(() => areaList([{ groupID: "InvestmentArea", values: [{ sort: 1, value: 7 }] }]));
-    await expect(fetchInvestmentAreaMap()).rejects.toThrow(/格式不符.*groups\[0\]\.values\[0\]\.value/);
+    await expect(fetchInvestmentAreaMap()).rejects.toThrow(/InvestmentArea.*格式不符.*\[0\]\.value/);
   });
 
   it("區域清單 condition 不見 → 格式錯誤(不再默默當成 0 個區域)", async () => {
@@ -107,16 +109,19 @@ describe("fetchInvestmentAreaMap — 上游契約驗證", () => {
     expect(errors[0]).toMatch(/歐洲.*格式不符.*fundIDs/);
   });
 
-  it("多出未知欄位 → 不丟錯,warnings 點名欄位", async () => {
+  it("多出未知欄位 → 不丟錯,upstreamWarnings 點名欄位(與區域 warning 分開)", async () => {
     stubAnue((body) => {
       if (body.condition.length === 0) {
-        return areaList([{ ...group("InvestmentArea", ["亞洲"]), brandNew: 1 }]);
+        const ia = group("InvestmentArea", ["亞洲"]);
+        return areaList([{ ...ia, brandNew: 1, values: ia.values.map((v) => ({ ...v, alsoNew: 1 })) }]);
       }
       return { succ: true, code: "00000", data: { fundIDs: "A01" } };
     });
-    const { areaOf, warnings, errors } = await fetchInvestmentAreaMap();
+    const { areaOf, warnings, upstreamWarnings, errors } = await fetchInvestmentAreaMap();
     expect(areaOf.get("A01")).toBe("亞洲");
     expect(errors).toEqual([]);
-    expect(warnings.join(" ")).toContain("data.condition.groups[].brandNew");
+    expect(warnings).toEqual([]);
+    expect(upstreamWarnings.join(" ")).toContain("data.condition.groups[].brandNew");
+    expect(upstreamWarnings.join(" ")).toContain("data.condition.groups[InvestmentArea].values[].alsoNew");
   });
 });

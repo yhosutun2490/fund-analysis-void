@@ -1,6 +1,7 @@
 // 鉅亨回應的 zod 驗證共用件。schema 只釘「結構與型別」;哨兵/null 的領域清理仍歸 normalize。
 // 偵測靈敏度：已知欄位被移除/改型別/在必填處變 null → 硬失敗;多出未知欄位 → 只回報（不 .strict()）。
 import { z } from "zod";
+import { describeIssues } from "./zodIssues";
 
 /** 鉅亨回應格式不符（契約變動）。與 HTTP / succ:false 等可用性錯誤分開,呼叫端據此分流。 */
 export class AnueSchemaError extends Error {
@@ -34,37 +35,28 @@ function collectUnknownKeys(schema: z.ZodType, value: unknown, path: string, out
   }
 }
 
-const pathOf = (path: PropertyKey[]) =>
-  path.reduce<string>((s, k) => (typeof k === "number" ? `${s}[${k}]` : s ? `${s}.${String(k)}` : String(k)), "");
-
-/** zod issues → 單行訊息;逐列同一錯誤可能上千處,只列前 3 處並附總數。 */
-function describeIssues(error: z.ZodError): string {
-  const shown = error.issues.slice(0, 3).map((i) => `${pathOf(i.path) || "(root)"}: ${i.message}`);
-  const more = error.issues.length > 3 ? `（共 ${error.issues.length} 處）` : "";
-  return shown.join("; ") + more;
-}
-
 /** 以 schema 驗證鉅亨回應;不符 → AnueSchemaError（點名路徑）,未知欄位 → 回傳於 unknownKeys。 */
 export function parseAnue<S extends z.ZodType>(
   schema: S,
   json: unknown,
   endpoint: string,
-): { data: z.output<S>; unknownKeys: string[] } {
+): { body: z.output<S>; unknownKeys: string[] } {
   const r = schema.safeParse(json);
   if (!r.success) throw new AnueSchemaError(`鉅亨 ${endpoint} 回應格式不符: ${describeIssues(r.error)}`);
   const out = new Set<string>();
   collectUnknownKeys(schema, json, "", out);
-  return { data: r.data, unknownKeys: [...out] };
+  return { body: r.data, unknownKeys: [...out] };
 }
 
-const Envelope = z.object({ succ: z.boolean(), code: z.string(), message: z.string().nullish() });
+/** 鉅亨各端點共用的外層信封;各回應 schema 以 .extend() 補上自己消費的欄位。 */
+export const AnueEnvelope = z.object({ succ: z.boolean(), code: z.string(), message: z.string().nullish() });
 
 /**
  * 先驗外層信封:succ:false 照舊丟一般上游錯誤（非格式問題）;succ:true 再以完整 schema 驗證。
  * 成功時 data 為必填,故「succ:true 但 data 變 null」屬格式不符。
  */
 export function parseAnueResponse<S extends z.ZodType>(schema: S, json: unknown, endpoint: string) {
-  const env = parseAnue(Envelope, json, endpoint).data;
+  const env = parseAnue(AnueEnvelope, json, endpoint).body;
   if (!env.succ) throw new Error(`Anue code ${env.code}: ${env.message ?? ""}`);
   return parseAnue(schema, json, endpoint);
 }

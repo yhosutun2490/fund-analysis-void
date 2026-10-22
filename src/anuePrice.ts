@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { PRICE_TOP } from "./anueKnownKeys";
-import { AnueSchemaError, parseAnue, parseAnueResponse, unknownKeysWarning, withKnownKeys } from "./anueSchema";
+import { AnueEnvelope, AnueSchemaError, parseAnue, parseAnueResponse, unknownKeysWarning, withKnownKeys } from "./anueSchema";
 import type { SeriesPoint } from "./recovery";
 
 const PRICE_URL = "https://www.anuefund.com/anuefundApi/FundDetail/Price";
@@ -56,10 +56,7 @@ export function spliceSegments(segments: [number, number][][]): SeriesPoint[] {
 }
 
 const PriceResponse = withKnownKeys(
-  z.object({
-    succ: z.boolean(),
-    code: z.string(),
-    message: z.string().nullish(),
+  AnueEnvelope.extend({
     data: z.string(), // JSON 字串 "[[epoch, pct], …]",空字串 = 無資料
   }),
   PRICE_TOP,
@@ -75,7 +72,7 @@ function parseSegment(raw: string): [number, number][] {
   } catch {
     throw new AnueSchemaError(`鉅亨 ${ENDPOINT} 回應格式不符: data 不是合法 JSON`);
   }
-  return parseAnue(PriceSegment, json, `${ENDPOINT} data`).data;
+  return parseAnue(PriceSegment, json, `${ENDPOINT} data`).body;
 }
 
 /** 抓單一段落,回 [[epoch, pct]];data 空字串 → []。每段逾時 10 秒。 */
@@ -97,10 +94,10 @@ async function fetchSegment(fundID: string, strDate: string, endDate: string): P
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error(`Anue HTTP ${res.status}`);
-    const { data, unknownKeys } = parseAnueResponse(PriceResponse, await res.json(), ENDPOINT);
+    const { body, unknownKeys } = parseAnueResponse(PriceResponse, await res.json(), ENDPOINT);
     if (unknownKeys.length) console.warn(unknownKeysWarning(ENDPOINT, unknownKeys));
-    if (!data.data) return [];
-    return parseSegment(data.data);
+    if (!body.data) return [];
+    return parseSegment(body.data);
   } finally {
     clearTimeout(timer);
   }

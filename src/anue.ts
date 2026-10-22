@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import * as KNOWN from "./anueKnownKeys";
-import { parseAnueResponse, unknownKeysWarning, withKnownKeys } from "./anueSchema";
+import { AnueEnvelope, AnueSchemaError, parseAnue, parseAnueResponse, unknownKeysWarning, withKnownKeys } from "./anueSchema";
 
 const ANUE_URL = "https://www.anuefund.com/anuefundApi/Search/Detail";
 const NA = -99999999.9999; // 哨兵值 = 無資料
@@ -16,58 +16,55 @@ export const num = (v: number | null | undefined): number | null =>
 export const cleanDate = (d: string | null | undefined): string | null =>
   d && !d.startsWith("1900-") ? d : null;
 
-const str = z.string().nullable();
-const numN = z.number().nullable(); // 可能帶哨兵值 -99999999.9999,交給 num() 清理
+const nullableStr = z.string().nullable();
+const nullableNum = z.number().nullable(); // 可能帶哨兵值 -99999999.9999,交給 num() 清理
 
 /** fundDatas[] 中 normalize 會讀的欄位（鍵必在;值可為 null/哨兵）。其餘實測欄位見 anueKnownKeys。 */
 const AnueRowSchema = withKnownKeys(
   z.object({
     fundID: z.string(),
-    isinCode: str,
-    lipperid: numN,
-    fundName: str,
-    fundGroup: str,
-    lippertW2_CHI: str,
-    fundCcyCode: str,
-    riskReturnRating: str,
-    llsRatings: str,
-    esG_Score: numN,
-    setup_date: str,
-    fundtnA_TWD: numN,
-    nav: numN,
-    navDate: str,
-    dataTime: str,
-    perF_IMEJDate: str, // 月底基準日（境外基金 dataTime 為空時的 as_of 回退）
-    standarD_DEVIATION_1YMEJ: numN,
-    sharpE_RATIO_1YMEJ: numN,
-    sharpE_RATIO_3YMEJ: numN,
-    sharpE_RATIO_5YMEJ: numN,
-    sharpE_RATIO_10YMEJ: numN,
-    perF_3MMEJ: numN,
-    perF_6MMEJ: numN,
-    perF_1YMEJ: numN,
-    perF_3YMEJ: numN,
-    perF_5YMEJ: numN,
-    year_ROI1: numN,
-    year_ROI2: numN,
-    year_ROI3: numN,
-    year_ROI4: numN,
-    year_ROI5: numN,
-    year_MaxQuoteChange1: numN,
-    year_MaxQuoteChange2: numN,
-    year_MaxQuoteChange3: numN,
-    year_MaxQuoteChange4: numN,
-    year_MaxQuoteChange5: numN,
+    isinCode: nullableStr,
+    lipperid: nullableNum,
+    fundName: nullableStr,
+    fundGroup: nullableStr,
+    lippertW2_CHI: nullableStr,
+    fundCcyCode: nullableStr,
+    riskReturnRating: nullableStr,
+    llsRatings: nullableStr,
+    esG_Score: nullableNum,
+    setup_date: nullableStr,
+    fundtnA_TWD: nullableNum,
+    nav: nullableNum,
+    navDate: nullableStr,
+    dataTime: nullableStr,
+    perF_IMEJDate: nullableStr, // 月底基準日（境外基金 dataTime 為空時的 as_of 回退）
+    standarD_DEVIATION_1YMEJ: nullableNum,
+    sharpE_RATIO_1YMEJ: nullableNum,
+    sharpE_RATIO_3YMEJ: nullableNum,
+    sharpE_RATIO_5YMEJ: nullableNum,
+    sharpE_RATIO_10YMEJ: nullableNum,
+    perF_3MMEJ: nullableNum,
+    perF_6MMEJ: nullableNum,
+    perF_1YMEJ: nullableNum,
+    perF_3YMEJ: nullableNum,
+    perF_5YMEJ: nullableNum,
+    year_ROI1: nullableNum,
+    year_ROI2: nullableNum,
+    year_ROI3: nullableNum,
+    year_ROI4: nullableNum,
+    year_ROI5: nullableNum,
+    year_MaxQuoteChange1: nullableNum,
+    year_MaxQuoteChange2: nullableNum,
+    year_MaxQuoteChange3: nullableNum,
+    year_MaxQuoteChange4: nullableNum,
+    year_MaxQuoteChange5: nullableNum,
   }),
   KNOWN.FUND_ROW,
 );
 export type AnueRow = z.infer<typeof AnueRowSchema>;
 
 const SearchResponse = withKnownKeys(
-  z.object({
-    succ: z.boolean(),
-    code: z.string(),
-    message: z.string().nullish(),
+  AnueEnvelope.extend({
     dataTime: z.string(),
     data: withKnownKeys(z.object({ dataCount: z.number(), fundDatas: z.array(AnueRowSchema) }), KNOWN.SEARCH_DATA),
   }),
@@ -102,41 +99,33 @@ export async function fetchAllFunds(
   pageSize = 2000,
 ): Promise<{ rows: AnueRow[]; dataTime: string; dataCount: number; warnings: string[] }> {
   const first = await fetchPage(1, pageSize);
-  const rows = [...first.data.data.fundDatas];
+  const rows = [...first.body.data.fundDatas];
   const unknown = new Set(first.unknownKeys);
-  const total = first.data.data.dataCount;
+  const total = first.body.data.dataCount;
   const pages = Math.ceil(total / pageSize);
   for (let p = 2; p <= pages; p++) {
     const next = await fetchPage(p, pageSize);
-    rows.push(...next.data.data.fundDatas);
+    rows.push(...next.body.data.fundDatas);
     next.unknownKeys.forEach((k) => unknown.add(k));
   }
   const warnings = unknown.size ? [unknownKeysWarning(SEARCH, [...unknown])] : [];
-  return { rows, dataTime: first.data.dataTime, dataCount: total, warnings };
+  return { rows, dataTime: first.body.dataTime, dataCount: total, warnings };
 }
 
 // ── 投資區域（市場）對照 ──────────────────────────────────────────
 // Search/Detail 的 fundDatas[] 無投資區域欄位；改以 InvestmentArea 篩選反查 data.fundIDs。
 
-const ConditionGroup = withKnownKeys(
-  z.object({
-    groupID: z.string(),
-    values: z.array(withKnownKeys(z.object({ value: z.string() }), KNOWN.CONDITION_VALUE)),
-  }),
-  KNOWN.CONDITION_GROUP,
-);
-type AnueConditionGroup = z.infer<typeof ConditionGroup>;
+// 篩選維度群組:只釘 groupID;values 的結構只對 InvestmentArea 驗證（見 parseAreaList）,
+// 其他我們不讀的維度改版不該讓區域對照失敗
+const ConditionGroup = withKnownKeys(z.object({ groupID: z.string(), values: z.unknown() }), KNOWN.CONDITION_GROUP);
+const AreaValues = z.array(withKnownKeys(z.object({ value: z.string() }), KNOWN.CONDITION_VALUE));
+const AREA_VALUES_PATH = "data.condition.groups[InvestmentArea].values";
 
 // 區域查詢不讀頂層 dataTime,故兩支 schema 只釘各自消費的部分
 const AREA_TOP = [...KNOWN.SEARCH_TOP, "dataTime"];
 const areaResponse = <T extends z.ZodRawShape>(data: T) =>
   withKnownKeys(
-    z.object({
-      succ: z.boolean(),
-      code: z.string(),
-      message: z.string().nullish(),
-      data: withKnownKeys(z.object(data), KNOWN.SEARCH_DATA),
-    }),
+    AnueEnvelope.extend({ data: withKnownKeys(z.object(data), KNOWN.SEARCH_DATA) }),
     AREA_TOP,
   );
 /** 空 condition 的探測:讀 data.condition.groups 取區域清單。 */
@@ -151,12 +140,18 @@ export function parseFundIDs(csv: string | null | undefined): string[] {
   return (csv ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-/** 從回應的 data.condition.groups 取 InvestmentArea 的區域清單（不寫死）。 */
-export function parseAreaList(
-  data: { condition?: { groups?: AnueConditionGroup[] } } | null | undefined,
-): string[] {
-  const g = data?.condition?.groups?.find((x) => x.groupID === "InvestmentArea");
-  return (g?.values ?? []).map((v) => v.value).filter(Boolean);
+/**
+ * 從 data.condition.groups 取 InvestmentArea 的區域清單（不寫死）。
+ * 找不到該群組或其 values 結構不符 → AnueSchemaError（不默默當成 0 個區域）。
+ */
+export function parseAreaList(groups: { groupID: string; values?: unknown }[]): { areas: string[]; unknownKeys: string[] } {
+  const g = groups.find((x) => x.groupID === "InvestmentArea");
+  if (!g) throw new AnueSchemaError(`鉅亨 ${SEARCH} 回應格式不符: data.condition.groups 找不到 InvestmentArea`);
+  const r = parseAnue(AreaValues, g.values, `${SEARCH} ${AREA_VALUES_PATH}`);
+  return {
+    areas: r.body.map((v) => v.value).filter(Boolean),
+    unknownKeys: r.unknownKeys.map((k) => AREA_VALUES_PATH + k),
+  };
 }
 
 /** 由各區域的 fundIDs 建立 fund_id → area 對照；一檔多區域取第一個並記 warning。 */
@@ -181,16 +176,18 @@ const AREA_PROBE = { desc: true, fundIDs: "", pageIndex: "1", pageSize: 1, sortC
  * 建立全站 fund_id → 投資區域對照。
  * 先以空 condition 取區域清單,再逐區以 pageSize:1 查 data.fundIDs。
  * 單區查詢失敗記入 errors 不拋出（呼叫端據此決定是否更新區域欄）。
+ * warnings = 區域歸屬警告;upstreamWarnings = 鉅亨加性變動（與區域成敗無關,呼叫端應一律記錄）。
  */
 export async function fetchInvestmentAreaMap(): Promise<{
   areaOf: Map<string, string>;
   warnings: string[];
   errors: string[];
+  upstreamWarnings: string[];
 }> {
   const errors: string[] = [];
   const first = parseAnueResponse(AreaListResponse, await postSearch({ condition: [], ...AREA_PROBE }), SEARCH);
-  const areas = parseAreaList(first.data.data);
-  const unknown = new Set(first.unknownKeys);
+  const { areas, unknownKeys } = parseAreaList(first.body.data.condition.groups);
+  const unknown = new Set([...first.unknownKeys, ...unknownKeys]);
 
   const assignments: { area: string; fundIDs: string[] }[] = [];
   for (const area of areas) {
@@ -198,14 +195,14 @@ export async function fetchInvestmentAreaMap(): Promise<{
       const json = await postSearch({ condition: [{ groupID: "InvestmentArea", parameterValue: area }], ...AREA_PROBE });
       const r = parseAnueResponse(AreaProbeResponse, json, SEARCH);
       r.unknownKeys.forEach((k) => unknown.add(k));
-      assignments.push({ area, fundIDs: parseFundIDs(r.data.data.fundIDs) });
+      assignments.push({ area, fundIDs: parseFundIDs(r.body.data.fundIDs) });
     } catch (e) {
       errors.push(`${area}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const { areaOf, warnings } = buildAreaMap(assignments);
-  if (unknown.size) warnings.push(unknownKeysWarning(SEARCH, [...unknown]));
-  return { areaOf, warnings, errors };
+  const upstreamWarnings = unknown.size ? [unknownKeysWarning(SEARCH, [...unknown])] : [];
+  return { areaOf, warnings, errors, upstreamWarnings };
 }
 
 export interface FundRecord {

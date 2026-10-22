@@ -33,7 +33,7 @@ const rowOf = <S extends Record<string, Column>>(selection: S) =>
 // ── 共用片段 ───────────────────────────────────────────────────
 
 const disclaimer = z.literal(DISCLAIMER);
-const count = z.number().int().nonnegative();
+const nonNegInt = z.number().int().nonnegative();
 const date = z.string(); // YYYY-MM-DD
 const numN = z.number().nullable();
 
@@ -52,9 +52,9 @@ export const RootResponse = z.strictObject({
 // ── /api/funds ─────────────────────────────────────────────────
 
 export const FundListResponse = z.strictObject({
-  count,
-  limit: count,
-  offset: count,
+  count: nonNegInt,
+  limit: nonNegInt,
+  offset: nonNegInt,
   disclaimer,
   funds: z.array(rowOf(fundListCols)),
 });
@@ -67,7 +67,7 @@ export const FundDetailResponse = z.strictObject({
 
 export const FundHistoryResponse = z.strictObject({
   fund_id: z.string(),
-  count,
+  count: nonNegInt,
   history: z.array(rowOf(riskCols)),
   disclaimer,
 });
@@ -96,7 +96,7 @@ export const RecoveryResponse = z.strictObject({
   currency: z.string().nullable(),
   basis: z.literal("total_return"),
   source: z.string(),
-  series: z.strictObject({ start: date, end: date, points: count, fetched_at: z.string(), stale: z.boolean() }),
+  series: z.strictObject({ start: date, end: date, points: nonNegInt, fetched_at: z.string(), stale: z.boolean() }),
   window: z.strictObject({ from: date, to: date }),
   mdd: Drawdown.nullable(),
   episodes: z.array(Drawdown),
@@ -126,8 +126,8 @@ const PassedFund = z.strictObject({
   sharpe_pct: numN,
   worst_drop: numN,
   worst_drop_pct: numN,
-  wins: count,
-  win_years: count,
+  wins: nonNegInt,
+  win_years: nonNegInt,
   ladder: z.strictObject({ ret_3m_pct: numN, ret_6m_pct: numN, ret_1y_pct: numN }),
   weak_flag: z.boolean().nullable(),
   reasons: z.array(z.string()),
@@ -146,10 +146,10 @@ const PassedFund = z.strictObject({
 const ScreenGroup = z.strictObject({
   category: z.string().nullable(),
   currency: z.string().nullable(),
-  peer_count: count,
-  matched_count: count,
+  peer_count: nonNegInt,
+  matched_count: nonNegInt,
   passed: z.array(PassedFund),
-  rejected_count: count,
+  rejected_count: nonNegInt,
   insufficient: z.array(
     z.strictObject({
       fund_id: z.string(),
@@ -185,7 +185,7 @@ export const ScreenResponse = z.strictObject({
 // ── /api/meta ──────────────────────────────────────────────────
 
 export const CategoriesResponse = z.strictObject({
-  categories: z.array(rowOf(categoryCols).extend({ n: count })),
+  categories: z.array(rowOf(categoryCols).extend({ n: nonNegInt })),
 });
 
 export const RunsResponse = z.strictObject({ runs: z.array(rowOf(runCols)) });
@@ -195,9 +195,9 @@ export const RunsResponse = z.strictObject({ runs: z.array(rowOf(runCols)) });
 export const AdminIngestOk = z.strictObject({
   status: z.literal("ok"),
   dataTime: z.string(),
-  dataCount: count,
-  fetched: count,
-  upserted: count,
+  dataCount: nonNegInt,
+  fetched: nonNegInt,
+  upserted: nonNegInt,
   note: z.string().optional(),
 });
 

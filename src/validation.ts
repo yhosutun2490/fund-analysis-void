@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import type { ValidationTargets } from "hono";
 import { createMiddleware } from "hono/factory";
 import { z } from "zod";
+import { describeIssues } from "./zodIssues";
 
 /** 驗證失敗 → 400 { error },訊息取第一個 issue（schema 內已寫好 zh-TW 用語:參數名 + 有效範圍/允許值）。 */
 export const validate = <T extends keyof ValidationTargets, S extends z.ZodType>(target: T, schema: S) =>
@@ -61,11 +62,7 @@ export const responds = (schemas: Partial<Record<number, z.ZodType>>) =>
     if (!schema || !c.res.headers.get("content-type")?.includes("application/json")) return;
     const r = schema.safeParse(await c.res.clone().json());
     if (r.success) return;
-    const issues = r.error.issues
-      .slice(0, 3)
-      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
-      .join("; ");
-    const msg = `response schema mismatch ${c.req.method} ${c.req.routePath} ${c.res.status}: ${issues}`;
+    const msg = `response schema mismatch ${c.req.method} ${c.req.routePath} ${c.res.status}: ${describeIssues(r.error)}`;
     if (!import.meta.env.PROD) throw new Error(msg);
     console.error(msg);
   });

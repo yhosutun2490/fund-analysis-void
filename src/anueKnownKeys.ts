@@ -5,7 +5,7 @@
 /** Search/Detail 頂層。 */
 export const SEARCH_TOP = ["returnParam"] as const;
 
-/** Search/Detail 的 data。 */
+/** Search/Detail 的 data 全部欄位（各 schema 只消費其中一部分;已在 schema 內者以 schema 為準）。 */
 export const SEARCH_DATA = ["dataCount", "fundIDs", "fundDatas", "groupAverage", "condition"] as const;
 
 /** Search/Detail 的 data.condition 與其 groups[] / values[]。 */

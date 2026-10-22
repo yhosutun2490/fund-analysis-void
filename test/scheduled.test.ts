@@ -108,4 +108,12 @@ describe("scheduled trigger — Discord 通知", () => {
     await runCron();
     expect(posts[0].content.length).toBeLessThanOrEqual(2000);
   });
+
+  it.each(["", "x"])("截斷不切壞 emoji(前綴 %j)", async (pad) => {
+    vi.mocked(runIngest).mockRejectedValueOnce(new Error(pad + "😀".repeat(1500)));
+    await runCron();
+    const c = posts[0].content;
+    expect(c.length).toBeLessThanOrEqual(2000);
+    expect(c).not.toMatch(/[\uD800-\uDBFF]$/);
+  });
 });
