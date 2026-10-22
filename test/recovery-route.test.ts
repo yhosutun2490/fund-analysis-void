@@ -175,3 +175,46 @@ describe("GET /api/funds/:id/recovery — 鉅亨格式不符與上游不可用�
     log.mockRestore();
   });
 });
+
+describe("GET /api/funds/:id/recovery — 請求驗證", () => {
+  const fund = { fund_id: "V1", name: "f", currency: "USD", setup_date: "2015-01-01" };
+  const freshCache = {
+    fund_id: "V1", basis: "total_return", series_start: "2018-01-01", series_end: "2026-10-09",
+    points: JSON.stringify(series(70)), fetched_at: "2026-10-10T00:00:00Z",
+  };
+
+  beforeEach(() => {
+    vi.mocked(getFund).mockResolvedValue(fund as never);
+    vi.mocked(getLatestRisk).mockResolvedValue({ nav_date: "2026-10-09" } as never);
+    vi.mocked(getSeries).mockResolvedValue(freshCache as never);
+  });
+
+  async function error400(path: string) {
+    const res = await req(path);
+    expect(res.status).toBe(400);
+    return ((await res.json()) as { error: string }).error;
+  }
+
+  it.each([
+    ["minDepth=0", "minDepth 須在 (0,100)"],
+    ["minDepth=100", "minDepth 須在 (0,100)"],
+    ["minDepth=abc", "minDepth 須在 (0,100)"],
+    ["from=2026-1-1", "from 須為 YYYY-MM-DD"],
+    ["to=20260101", "to 須為 YYYY-MM-DD"],
+    ["from=2026-01-02&to=2026-01-01", "from 不可晚於 to"],
+  ])("%s → 400「%s」", async (qs, msg) => {
+    expect(await error400(`/api/funds/V1/recovery?${qs}`)).toBe(msg);
+  });
+
+  it.each(["minDepth=0.5", "minDepth=99.5", "from=2020-01-01&to=2020-01-01"])("邊界值 %s 接受", async (qs) => {
+    expect((await req(`/api/funds/V1/recovery?${qs}`)).status).toBe(200);
+  });
+
+  it("refresh=true → 不用新鮮快取,整條重抓;未給則沿用快取", async () => {
+    vi.mocked(fetchTotalReturnSeries).mockResolvedValue(series(70));
+    await req("/api/funds/V1/recovery");
+    expect(fetchTotalReturnSeries).not.toHaveBeenCalled();
+    await req("/api/funds/V1/recovery?refresh=true");
+    expect(fetchTotalReturnSeries).toHaveBeenCalledOnce();
+  });
+});

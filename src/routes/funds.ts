@@ -1,40 +1,70 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import { AnueSchemaError } from "../anueSchema";
 import { DISCLAIMER } from "../disclaimer";
 import type { Env } from "../bindings";
 import { computeEpisodes, computeEvents, computeLumpSum, computeMdd, recentReturns, sliceWindow } from "../recovery";
 import { getFund, getLatestRisk, getRiskHistory, listFunds } from "../repositories/funds";
 import { loadSeries, UpstreamUnavailable } from "../services/recovery";
+import { blankAsMissing, finiteNum, isoDate, nonNegInt, validate } from "../validation";
 
 export const funds = new Hono<{ Bindings: Env }>();
 
 const MIN_POINTS = 60;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** /api/funds 的輸入契約。limit 超過 500 夾到 500;空值參數視同未給;未知 sort 由 repository 回退 sharpe_3y。 */
+const FundListQuery = z.object({
+  group: z.string().optional(),
+  category: z.string().optional(),
+  currency: z.string().optional(),
+  rr: z.string().optional(),
+  domicile: z.string().optional(),
+  minSharpe3y: blankAsMissing(finiteNum("minSharpe3y").optional()),
+  maxStd1y: blankAsMissing(finiteNum("maxStd1y").optional()),
+  sort: z.string().optional(),
+  order: blankAsMissing(
+    z
+      .string()
+      .toLowerCase()
+      .pipe(z.enum(["asc", "desc"], { error: "order 僅允許 asc/desc" }))
+      .default("desc"),
+  ),
+  limit: nonNegInt("limit")
+    .default(50)
+    .transform((n) => Math.min(n, 500)),
+  offset: nonNegInt("offset").default(0),
+});
+
+const FundIdParam = z.object({ id: z.string().min(1) });
+
+/** /api/funds/:id/recovery 的輸入契約。 */
+const minDepthError = "minDepth 須在 (0,100)";
+const RecoveryQuery = z
+  .object({
+    from: isoDate("from").optional(),
+    to: isoDate("to").optional(),
+    minDepth: z.coerce
+      .number({ error: minDepthError })
+      .gt(0, { error: minDepthError })
+      .lt(100, { error: minDepthError })
+      .default(10),
+    refresh: z
+      .string()
+      .optional()
+      .transform((v) => v === "true"),
+  })
+  .refine((q) => !(q.from && q.to && q.from > q.to), { error: "from 不可晚於 to" });
 
 // 基金清單 + 篩選 + 排序（以最新快照）
-funds.get("/", async (c) => {
-  const q = c.req.query();
-  const limit = Math.min(Number(q.limit ?? "50"), 500);
-  const offset = Number(q.offset ?? "0");
-  const results = await listFunds(c.env.DB, {
-    group: q.group,
-    category: q.category,
-    currency: q.currency,
-    rr: q.rr,
-    domicile: q.domicile,
-    minSharpe3y: q.minSharpe3y ? Number(q.minSharpe3y) : undefined,
-    maxStd1y: q.maxStd1y ? Number(q.maxStd1y) : undefined,
-    sort: q.sort,
-    order: (q.order ?? "desc").toLowerCase() === "asc" ? "ASC" : "DESC",
-    limit,
-    offset,
-  });
+funds.get("/", validate("query", FundListQuery), async (c) => {
+  const { order, limit, offset, ...q } = c.req.valid("query");
+  const results = await listFunds(c.env.DB, { ...q, order: order === "asc" ? "ASC" : "DESC", limit, offset });
   return c.json({ count: results.length, limit, offset, disclaimer: DISCLAIMER, funds: results });
 });
 
 // 單檔：基本資料 + 最新快照
-funds.get("/:id", async (c) => {
-  const id = c.req.param("id");
+funds.get("/:id", validate("param", FundIdParam), async (c) => {
+  const { id } = c.req.valid("param");
   const fund = await getFund(c.env.DB, id);
   if (!fund) return c.json({ error: "not found" }, 404);
   const latest = await getLatestRisk(c.env.DB, id);
@@ -42,25 +72,15 @@ funds.get("/:id", async (c) => {
 });
 
 // 單檔回復分析：含息序列的最大回撤與近期報酬（episodes/events/lump_sum 由後續 ticket 疊加）
-funds.get("/:id/recovery", async (c) => {
-  const id = c.req.param("id");
+funds.get("/:id/recovery", validate("param", FundIdParam), validate("query", RecoveryQuery), async (c) => {
+  const { id } = c.req.valid("param");
+  const { from, to, minDepth, refresh } = c.req.valid("query");
   const fund = (await getFund(c.env.DB, id)) as { fund_id: string; name?: string; currency?: string; setup_date?: string | null } | null;
   if (!fund) return c.json({ error: "not found" }, 404);
 
-  // 參數：from/to 分析窗口、minDepth 回撤事件門檻
-  const q = c.req.query();
-  const { from, to } = q;
-  if (from !== undefined && !DATE_RE.test(from)) return c.json({ error: "from 須為 YYYY-MM-DD" }, 400);
-  if (to !== undefined && !DATE_RE.test(to)) return c.json({ error: "to 須為 YYYY-MM-DD" }, 400);
-  if (from && to && from > to) return c.json({ error: "from 不可晚於 to" }, 400);
-  const minDepth = q.minDepth === undefined ? 10 : Number(q.minDepth);
-  if (!Number.isFinite(minDepth) || minDepth <= 0 || minDepth >= 100) {
-    return c.json({ error: "minDepth 須在 (0,100)" }, 400);
-  }
-
   let data;
   try {
-    data = await loadSeries(c.env, fund, { refresh: q.refresh === "true" });
+    data = await loadSeries(c.env, fund, { refresh });
   } catch (e) {
     if (e instanceof UpstreamUnavailable) return c.json({ error: `上游無法取得且無快取: ${e.message}` }, 502);
     if (e instanceof AnueSchemaError) return c.json({ error: `上游回應格式變動且無快取: ${e.message}` }, 502);
@@ -91,8 +111,8 @@ funds.get("/:id/recovery", async (c) => {
 });
 
 // 單檔風險歷史（cron 累積出來的月序列）
-funds.get("/:id/history", async (c) => {
-  const id = c.req.param("id");
+funds.get("/:id/history", validate("param", FundIdParam), async (c) => {
+  const { id } = c.req.valid("param");
   const history = await getRiskHistory(c.env.DB, id);
   return c.json({ fund_id: id, count: history.length, history, disclaimer: DISCLAIMER });
 });
