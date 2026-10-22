@@ -1,6 +1,9 @@
 // 鉅亨 FundDetail/Price（PerformanceHIS = 含配息累積報酬 %）擷取與串接。
 // 合約細節見 docs/research/2026-10-10-anue-fund-search-api.md。
 
+import { z } from "zod";
+import { PRICE_TOP } from "./anueKnownKeys";
+import { AnueSchemaError, parseAnue, parseAnueResponse, unknownKeysWarning, withKnownKeys } from "./anueSchema";
 import type { SeriesPoint } from "./recovery";
 
 const PRICE_URL = "https://www.anuefund.com/anuefundApi/FundDetail/Price";
@@ -52,11 +55,27 @@ export function spliceSegments(segments: [number, number][][]): SeriesPoint[] {
   return out;
 }
 
-interface PriceResponse {
-  succ: boolean;
-  code: string;
-  message?: string;
-  data: string; // JSON 字串 "[[epoch, pct], …]",空字串 = 無資料
+const PriceResponse = withKnownKeys(
+  z.object({
+    succ: z.boolean(),
+    code: z.string(),
+    message: z.string().nullish(),
+    data: z.string(), // JSON 字串 "[[epoch, pct], …]",空字串 = 無資料
+  }),
+  PRICE_TOP,
+);
+const PriceSegment = z.array(z.tuple([z.number(), z.number()]));
+const ENDPOINT = "FundDetail/Price";
+
+/** data 字串 → [[epoch, pct]];JSON 壞掉或點的型別不符皆屬格式不符。 */
+function parseSegment(raw: string): [number, number][] {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new AnueSchemaError(`鉅亨 ${ENDPOINT} 回應格式不符: data 不是合法 JSON`);
+  }
+  return parseAnue(PriceSegment, json, `${ENDPOINT} data`).data;
 }
 
 /** 抓單一段落,回 [[epoch, pct]];data 空字串 → []。每段逾時 10 秒。 */
@@ -78,10 +97,10 @@ async function fetchSegment(fundID: string, strDate: string, endDate: string): P
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error(`Anue HTTP ${res.status}`);
-    const json = (await res.json()) as PriceResponse;
-    if (!json.succ) throw new Error(`Anue code ${json.code}: ${json.message ?? ""}`);
-    if (!json.data) return [];
-    return JSON.parse(json.data) as [number, number][];
+    const { data, unknownKeys } = parseAnueResponse(PriceResponse, await res.json(), ENDPOINT);
+    if (unknownKeys.length) console.warn(unknownKeysWarning(ENDPOINT, unknownKeys));
+    if (!data.data) return [];
+    return parseSegment(data.data);
   } finally {
     clearTimeout(timer);
   }

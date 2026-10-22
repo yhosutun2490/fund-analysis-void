@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chunkRanges, fetchTotalReturnSeries, spliceSegments } from "../src/anuePrice";
+import { AnueSchemaError } from "../src/anueSchema";
 
 describe("chunkRanges — ≤3 年切塊、交界日共用", () => {
   it("6 年 → 2 段", () => {
@@ -71,5 +72,49 @@ describe("fetchTotalReturnSeries — mock fetch", () => {
     );
     const series = await fetchTotalReturnSeries("X", "2024-01-01", "2025-01-01");
     expect(series).toEqual([]);
+  });
+});
+
+describe("fetchTotalReturnSeries — 上游契約驗證", () => {
+  const respond = (json: unknown) =>
+    vi.stubGlobal("fetch", async () => ({ ok: true, json: async () => json }) as Response);
+
+  it("data 改型別(非字串) → 丟出點名 data 的格式錯誤", async () => {
+    respond({ succ: true, code: "00000", data: [[1, 2]] });
+    await expect(fetchTotalReturnSeries("X", "2024-01-01", "2025-01-01")).rejects.toThrow(/格式不符.*data/);
+  });
+
+  it("data 內的點改型別 → 丟出點名出錯位置的格式錯誤", async () => {
+    respond({ succ: true, code: "00000", data: JSON.stringify([[d("2024-01-01"), "0"]]) });
+    await expect(fetchTotalReturnSeries("X", "2024-01-01", "2025-01-01")).rejects.toThrow(/格式不符.*\[0\]\[1\]/);
+  });
+
+  it("整包結構改變(非物件) → 丟出格式錯誤", async () => {
+    respond("<html>maintenance</html>");
+    await expect(fetchTotalReturnSeries("X", "2024-01-01", "2025-01-01")).rejects.toThrow(/格式不符/);
+  });
+
+  it("succ:false 仍為一般上游錯誤(非格式錯誤)", async () => {
+    respond({ succ: false, code: "00999", message: "參數超限", data: null });
+    const err = await fetchTotalReturnSeries("X", "2024-01-01", "2025-01-01").catch((e) => e);
+    expect(err.message).toContain("00999");
+    expect(err).not.toBeInstanceOf(AnueSchemaError);
+  });
+
+  it("多出未知欄位 → 不丟錯,照常回傳並記 warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    respond({ succ: true, code: "00000", data: JSON.stringify([[d("2024-01-01"), 0]]), brandNew: 1 });
+    const series = await fetchTotalReturnSeries("X", "2024-01-01", "2025-01-01");
+    expect(series).toHaveLength(1);
+    expect(warn.mock.calls.flat().join(" ")).toContain("brandNew");
+    warn.mockRestore();
+  });
+
+  it("目前已知的回應欄位(dataTime/returnParam)不算未知", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    respond({ succ: true, code: "00000", message: "", dataTime: "2026-10-22", returnParam: {}, data: "" });
+    await fetchTotalReturnSeries("X", "2024-01-01", "2025-01-01");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { AnueSchemaError } from "../anueSchema";
 import { DISCLAIMER } from "../disclaimer";
 import type { Env } from "../bindings";
 import { computeEpisodes, computeEvents, computeLumpSum, computeMdd, recentReturns, sliceWindow } from "../recovery";
@@ -62,6 +63,7 @@ funds.get("/:id/recovery", async (c) => {
     data = await loadSeries(c.env, fund, { refresh: q.refresh === "true" });
   } catch (e) {
     if (e instanceof UpstreamUnavailable) return c.json({ error: `上游無法取得且無快取: ${e.message}` }, 502);
+    if (e instanceof AnueSchemaError) return c.json({ error: `上游回應格式變動且無快取: ${e.message}` }, 502);
     throw e;
   }
 

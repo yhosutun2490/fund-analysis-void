@@ -11,6 +11,7 @@ vi.mock("../src/repositories/funds", () => ({
 }));
 
 import { app } from "../src/app";
+import { AnueSchemaError } from "../src/anueSchema";
 import { fetchTotalReturnSeries } from "../src/anuePrice";
 import { getFund, getLatestRisk } from "../src/repositories/funds";
 import { getSeries, saveSeries } from "../src/repositories/series";
@@ -118,5 +119,59 @@ describe("GET /api/funds/:id/recovery — 錯誤處理", () => {
     const body = (await res.json()) as any;
     expect(body.series.stale).toBe(true);
     expect(body.warning).toBeTruthy();
+  });
+});
+
+describe("GET /api/funds/:id/recovery — 鉅亨格式不符與上游不可用分開", () => {
+  const schemaErr = () => new AnueSchemaError("鉅亨 FundDetail/Price 回應格式不符: data: Invalid input: expected string, received array");
+  const staleCache = (id: string) => ({
+    fund_id: id, basis: "total_return",
+    series_start: "2018-01-01", series_end: "2020-01-01",
+    points: JSON.stringify(series(70)), fetched_at: "2020-01-02T00:00:00Z",
+  });
+
+  it("無快取 + 格式不符 → 502,訊息標明是格式問題(非一般不可用),並記錄", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(getFund).mockResolvedValue({ fund_id: "C1", name: "f", setup_date: "2015-01-01" } as never);
+    vi.mocked(getSeries).mockResolvedValue(null as never);
+    vi.mocked(fetchTotalReturnSeries).mockRejectedValue(schemaErr());
+    const res = await req("/api/funds/C1/recovery");
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("格式");
+    expect(body.error).toContain("expected string");
+    expect(body.error).not.toContain("上游無法取得");
+    expect(log.mock.calls.flat().join(" ")).toContain("格式不符");
+    log.mockRestore();
+  });
+
+  it("有快取 + 整條重抓格式不符 → 200 回快取,warning 明確指出上游格式變動,並記錄", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(getFund).mockResolvedValue({ fund_id: "C2", name: "f", setup_date: "2015-01-01" } as never);
+    vi.mocked(getSeries).mockResolvedValue(staleCache("C2") as never);
+    vi.mocked(fetchTotalReturnSeries).mockRejectedValue(schemaErr());
+    const res = await req("/api/funds/C2/recovery?refresh=true");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.series.stale).toBe(true);
+    expect(body.warning).toContain("格式變動");
+    expect(body.warning).not.toContain("上游失敗");
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("有快取 + 增量抓取格式不符 → warning 同樣明確指出格式變動(不併入一般增量失敗)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(getFund).mockResolvedValue({ fund_id: "C3", name: "f", setup_date: "2015-01-01" } as never);
+    vi.mocked(getLatestRisk).mockResolvedValue({ nav_date: "2026-10-09" } as never);
+    vi.mocked(getSeries).mockResolvedValue(staleCache("C3") as never);
+    vi.mocked(fetchTotalReturnSeries).mockRejectedValue(schemaErr());
+    const res = await req("/api/funds/C3/recovery");
+    const body = (await res.json()) as any;
+    expect(res.status).toBe(200);
+    expect(body.series.stale).toBe(true);
+    expect(body.warning).toContain("格式變動");
+    expect(body.warning).not.toContain("增量更新失敗");
+    log.mockRestore();
   });
 });

@@ -81,3 +81,42 @@ describe("fetchInvestmentAreaMap — 單區失敗不拋出", () => {
     expect(errors[0]).toContain("歐洲");
   });
 });
+
+describe("fetchInvestmentAreaMap — 上游契約驗證", () => {
+  const areaList = (groups: unknown[]) => ({ succ: true, code: "00000", data: { fundIDs: "", condition: { groups } } });
+
+  it("區域清單結構改變(values[].value 改型別) → 丟出點名路徑的格式錯誤", async () => {
+    stubAnue(() => areaList([{ groupID: "InvestmentArea", values: [{ sort: 1, value: 7 }] }]));
+    await expect(fetchInvestmentAreaMap()).rejects.toThrow(/格式不符.*groups\[0\]\.values\[0\]\.value/);
+  });
+
+  it("區域清單 condition 不見 → 格式錯誤(不再默默當成 0 個區域)", async () => {
+    stubAnue(() => ({ succ: true, code: "00000", data: { fundIDs: "" } }));
+    await expect(fetchInvestmentAreaMap()).rejects.toThrow(/格式不符.*condition/);
+  });
+
+  it("單區回應格式不符 → 記入 errors(點名格式問題),其餘區域照常", async () => {
+    stubAnue((body) => {
+      if (body.condition.length === 0) return areaList([group("InvestmentArea", ["亞洲", "歐洲"])]);
+      const area = body.condition[0].parameterValue;
+      return { succ: true, code: "00000", data: { fundIDs: area === "歐洲" ? 123 : "A01" } };
+    });
+    const { areaOf, errors } = await fetchInvestmentAreaMap();
+    expect(areaOf.get("A01")).toBe("亞洲");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/歐洲.*格式不符.*fundIDs/);
+  });
+
+  it("多出未知欄位 → 不丟錯,warnings 點名欄位", async () => {
+    stubAnue((body) => {
+      if (body.condition.length === 0) {
+        return areaList([{ ...group("InvestmentArea", ["亞洲"]), brandNew: 1 }]);
+      }
+      return { succ: true, code: "00000", data: { fundIDs: "A01" } };
+    });
+    const { areaOf, warnings, errors } = await fetchInvestmentAreaMap();
+    expect(areaOf.get("A01")).toBe("亞洲");
+    expect(errors).toEqual([]);
+    expect(warnings.join(" ")).toContain("data.condition.groups[].brandNew");
+  });
+});

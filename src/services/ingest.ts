@@ -22,10 +22,12 @@ export async function runIngest(env: Env) {
   const started = new Date().toISOString();
   const pageSize = Number(env.ANUE_PAGE_SIZE ?? "2000");
   try {
-    const { rows, dataTime, dataCount } = await fetchAllFunds(pageSize);
+    const { rows, dataTime, dataCount, warnings } = await fetchAllFunds(pageSize);
     const records = rows.map(normalize);
     const upserted = await upsertRecords(env.DB, records);
-    const note = await ingestAreas(env);
+    // 鉅亨加性變動 warning 與投資區域 warning 並列;皆無 → undefined（乾淨成功）
+    const notes = [...warnings, await ingestAreas(env)].filter((n): n is string => !!n);
+    const note = notes.length ? notes.join("; ") : undefined;
     const finished = new Date().toISOString();
     await recordRun(env.DB, {
       started_at: started, finished_at: finished, data_time: dataTime,

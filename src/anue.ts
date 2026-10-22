@@ -1,6 +1,10 @@
 // 鉅亨買基金 Search/Detail 擷取與正規化
 // 合約細節見 docs/research/2026-10-10-anue-fund-search-api.md
 
+import { z } from "zod";
+import * as KNOWN from "./anueKnownKeys";
+import { parseAnueResponse, unknownKeysWarning, withKnownKeys } from "./anueSchema";
+
 const ANUE_URL = "https://www.anuefund.com/anuefundApi/Search/Detail";
 const NA = -99999999.9999; // 哨兵值 = 無資料
 
@@ -12,113 +16,135 @@ export const num = (v: number | null | undefined): number | null =>
 export const cleanDate = (d: string | null | undefined): string | null =>
   d && !d.startsWith("1900-") ? d : null;
 
-export interface AnueRow {
-  fundID: string;
-  isinCode: string | null;
-  lipperid: number | null;
-  fundName: string | null;
-  fundGroup: string | null;
-  lippertW2_CHI: string | null;
-  fundCcyCode: string | null;
-  riskReturnRating: string | null;
-  llsRatings: string | null;
-  esG_Score: number | null;
-  setup_date: string | null;
-  fundtnA_TWD: number | null;
-  nav: number | null;
-  navDate: string | null;
-  dataTime: string | null;
-  perF_IMEJDate: string | null; // 月底基準日（境外基金 dataTime 為空時的 as_of 回退）
-  std_DEVIATION_1YMEJ?: number;
-  standarD_DEVIATION_1YMEJ: number | null;
-  sharpE_RATIO_1YMEJ: number | null;
-  sharpE_RATIO_3YMEJ: number | null;
-  sharpE_RATIO_5YMEJ: number | null;
-  sharpE_RATIO_10YMEJ: number | null;
-  perF_3MMEJ: number | null;
-  perF_6MMEJ: number | null;
-  perF_1YMEJ: number | null;
-  perF_3YMEJ: number | null;
-  perF_5YMEJ: number | null;
-  year_ROI1: number | null;
-  year_ROI2: number | null;
-  year_ROI3: number | null;
-  year_ROI4: number | null;
-  year_ROI5: number | null;
-  year_MaxQuoteChange1: number | null;
-  year_MaxQuoteChange2: number | null;
-  year_MaxQuoteChange3: number | null;
-  year_MaxQuoteChange4: number | null;
-  year_MaxQuoteChange5: number | null;
-}
+const str = z.string().nullable();
+const numN = z.number().nullable(); // 可能帶哨兵值 -99999999.9999,交給 num() 清理
 
-interface AnueResponse {
-  succ: boolean;
-  code: string;
-  message: string;
-  dataTime: string;
-  data: { dataCount: number; fundIDs: string; fundDatas: AnueRow[] } | null;
-}
+/** fundDatas[] 中 normalize 會讀的欄位（鍵必在;值可為 null/哨兵）。其餘實測欄位見 anueKnownKeys。 */
+const AnueRowSchema = withKnownKeys(
+  z.object({
+    fundID: z.string(),
+    isinCode: str,
+    lipperid: numN,
+    fundName: str,
+    fundGroup: str,
+    lippertW2_CHI: str,
+    fundCcyCode: str,
+    riskReturnRating: str,
+    llsRatings: str,
+    esG_Score: numN,
+    setup_date: str,
+    fundtnA_TWD: numN,
+    nav: numN,
+    navDate: str,
+    dataTime: str,
+    perF_IMEJDate: str, // 月底基準日（境外基金 dataTime 為空時的 as_of 回退）
+    standarD_DEVIATION_1YMEJ: numN,
+    sharpE_RATIO_1YMEJ: numN,
+    sharpE_RATIO_3YMEJ: numN,
+    sharpE_RATIO_5YMEJ: numN,
+    sharpE_RATIO_10YMEJ: numN,
+    perF_3MMEJ: numN,
+    perF_6MMEJ: numN,
+    perF_1YMEJ: numN,
+    perF_3YMEJ: numN,
+    perF_5YMEJ: numN,
+    year_ROI1: numN,
+    year_ROI2: numN,
+    year_ROI3: numN,
+    year_ROI4: numN,
+    year_ROI5: numN,
+    year_MaxQuoteChange1: numN,
+    year_MaxQuoteChange2: numN,
+    year_MaxQuoteChange3: numN,
+    year_MaxQuoteChange4: numN,
+    year_MaxQuoteChange5: numN,
+  }),
+  KNOWN.FUND_ROW,
+);
+export type AnueRow = z.infer<typeof AnueRowSchema>;
 
-async function fetchPage(pageIndex: number, pageSize: number): Promise<AnueResponse> {
-  const res = await fetch(ANUE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      condition: [],
-      desc: true,
-      fundIDs: "",
-      pageIndex: String(pageIndex),
-      pageSize,
-      sortColumnName: "fundID", // 穩定排序，避免翻頁邊界重複/遺漏
-    }),
-  });
-  if (!res.ok) throw new Error(`Anue HTTP ${res.status}`);
-  const json = (await res.json()) as AnueResponse;
-  if (!json.succ || !json.data) throw new Error(`Anue code ${json.code}: ${json.message}`);
-  return json;
-}
+const SearchResponse = withKnownKeys(
+  z.object({
+    succ: z.boolean(),
+    code: z.string(),
+    message: z.string().nullish(),
+    dataTime: z.string(),
+    data: withKnownKeys(z.object({ dataCount: z.number(), fundDatas: z.array(AnueRowSchema) }), KNOWN.SEARCH_DATA),
+  }),
+  KNOWN.SEARCH_TOP,
+);
+const SEARCH = "Search/Detail";
 
-/** 抓全站所有基金。pageSize 上限實測 3000。 */
-export async function fetchAllFunds(
-  pageSize = 2000,
-): Promise<{ rows: AnueRow[]; dataTime: string; dataCount: number }> {
-  const first = await fetchPage(1, pageSize);
-  const rows = [...first.data!.fundDatas];
-  const total = first.data!.dataCount;
-  const pages = Math.ceil(total / pageSize);
-  for (let p = 2; p <= pages; p++) {
-    const next = await fetchPage(p, pageSize);
-    rows.push(...next.data!.fundDatas);
-  }
-  return { rows, dataTime: first.dataTime, dataCount: total };
-}
-
-// ── 投資區域（市場）對照 ──────────────────────────────────────────
-// Search/Detail 的 fundDatas[] 無投資區域欄位；改以 InvestmentArea 篩選反查 data.fundIDs。
-
-interface AnueConditionGroup {
-  groupID: string;
-  values?: { value: string }[];
-}
-interface AreaResponse {
-  succ: boolean;
-  code: string;
-  message?: string;
-  data: { fundIDs: string; condition?: { groups?: AnueConditionGroup[] } } | null;
-}
-
-async function post(body: Record<string, unknown>): Promise<AreaResponse> {
+async function postSearch(body: Record<string, unknown>): Promise<unknown> {
   const res = await fetch(ANUE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Anue HTTP ${res.status}`);
-  const json = (await res.json()) as AreaResponse;
-  if (!json.succ || !json.data) throw new Error(`Anue code ${json.code}: ${json.message ?? ""}`);
-  return json;
+  return res.json();
 }
+
+async function fetchPage(pageIndex: number, pageSize: number) {
+  const json = await postSearch({
+    condition: [],
+    desc: true,
+    fundIDs: "",
+    pageIndex: String(pageIndex),
+    pageSize,
+    sortColumnName: "fundID", // 穩定排序，避免翻頁邊界重複/遺漏
+  });
+  return parseAnueResponse(SearchResponse, json, SEARCH);
+}
+
+/** 抓全站所有基金。pageSize 上限實測 3000。 */
+export async function fetchAllFunds(
+  pageSize = 2000,
+): Promise<{ rows: AnueRow[]; dataTime: string; dataCount: number; warnings: string[] }> {
+  const first = await fetchPage(1, pageSize);
+  const rows = [...first.data.data.fundDatas];
+  const unknown = new Set(first.unknownKeys);
+  const total = first.data.data.dataCount;
+  const pages = Math.ceil(total / pageSize);
+  for (let p = 2; p <= pages; p++) {
+    const next = await fetchPage(p, pageSize);
+    rows.push(...next.data.data.fundDatas);
+    next.unknownKeys.forEach((k) => unknown.add(k));
+  }
+  const warnings = unknown.size ? [unknownKeysWarning(SEARCH, [...unknown])] : [];
+  return { rows, dataTime: first.data.dataTime, dataCount: total, warnings };
+}
+
+// ── 投資區域（市場）對照 ──────────────────────────────────────────
+// Search/Detail 的 fundDatas[] 無投資區域欄位；改以 InvestmentArea 篩選反查 data.fundIDs。
+
+const ConditionGroup = withKnownKeys(
+  z.object({
+    groupID: z.string(),
+    values: z.array(withKnownKeys(z.object({ value: z.string() }), KNOWN.CONDITION_VALUE)),
+  }),
+  KNOWN.CONDITION_GROUP,
+);
+type AnueConditionGroup = z.infer<typeof ConditionGroup>;
+
+// 區域查詢不讀頂層 dataTime,故兩支 schema 只釘各自消費的部分
+const AREA_TOP = [...KNOWN.SEARCH_TOP, "dataTime"];
+const areaResponse = <T extends z.ZodRawShape>(data: T) =>
+  withKnownKeys(
+    z.object({
+      succ: z.boolean(),
+      code: z.string(),
+      message: z.string().nullish(),
+      data: withKnownKeys(z.object(data), KNOWN.SEARCH_DATA),
+    }),
+    AREA_TOP,
+  );
+/** 空 condition 的探測:讀 data.condition.groups 取區域清單。 */
+const AreaListResponse = areaResponse({
+  condition: withKnownKeys(z.object({ groups: z.array(ConditionGroup) }), KNOWN.CONDITION),
+});
+/** 單區探測:讀 data.fundIDs。 */
+const AreaProbeResponse = areaResponse({ fundIDs: z.string() });
 
 /** 逗號分隔的基金代碼字串 → 陣列（去空白、濾空）。 */
 export function parseFundIDs(csv: string | null | undefined): string[] {
@@ -162,19 +188,23 @@ export async function fetchInvestmentAreaMap(): Promise<{
   errors: string[];
 }> {
   const errors: string[] = [];
-  const first = await post({ condition: [], ...AREA_PROBE });
-  const areas = parseAreaList(first.data);
+  const first = parseAnueResponse(AreaListResponse, await postSearch({ condition: [], ...AREA_PROBE }), SEARCH);
+  const areas = parseAreaList(first.data.data);
+  const unknown = new Set(first.unknownKeys);
 
   const assignments: { area: string; fundIDs: string[] }[] = [];
   for (const area of areas) {
     try {
-      const r = await post({ condition: [{ groupID: "InvestmentArea", parameterValue: area }], ...AREA_PROBE });
-      assignments.push({ area, fundIDs: parseFundIDs(r.data!.fundIDs) });
+      const json = await postSearch({ condition: [{ groupID: "InvestmentArea", parameterValue: area }], ...AREA_PROBE });
+      const r = parseAnueResponse(AreaProbeResponse, json, SEARCH);
+      r.unknownKeys.forEach((k) => unknown.add(k));
+      assignments.push({ area, fundIDs: parseFundIDs(r.data.data.fundIDs) });
     } catch (e) {
       errors.push(`${area}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const { areaOf, warnings } = buildAreaMap(assignments);
+  if (unknown.size) warnings.push(unknownKeysWarning(SEARCH, [...unknown]));
   return { areaOf, warnings, errors };
 }
 

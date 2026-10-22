@@ -1,4 +1,5 @@
 import { fetchTotalReturnSeries } from "../anuePrice";
+import { AnueSchemaError } from "../anueSchema";
 import type { Env } from "../bindings";
 import { computeLumpSum, computeMdd, type SeriesPoint } from "../recovery";
 import { getLatestRisk } from "../repositories/funds";
@@ -20,6 +21,16 @@ const DAY_MS = 86_400_000;
 const today = () => new Date().toISOString().slice(0, 10);
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/**
+ * 上游失敗改用快取時的 warning。鉅亨格式不符不得併入一般降級:一律記錄,並給專屬 warning,
+ * 讓契約變動不會藏在 stale 快取後面。
+ */
+function fallbackWarning(e: unknown, generic: string): string {
+  if (!(e instanceof AnueSchemaError)) return `${generic}: ${msg(e)}`;
+  console.error("anue schema mismatch (recovery, cache fallback)", e.message);
+  return `上游格式變動,沿用快取: ${e.message}`;
+}
+
 /** 新鮮：series_end ≥ 最新快照 nav_date;nav_date 未知時 fetched_at 在 24 小時內。 */
 function isFresh(cached: SeriesRow, navDate: string | null): boolean {
   if (navDate) return cached.series_end >= navDate;
@@ -35,10 +46,6 @@ const fromCache = (c: SeriesRow, stale: boolean, warning?: string): LoadedSeries
   warning,
 });
 
-/**
- * 取得含息序列：快取新鮮則直接用,否則整條重抓並存檔。
- * 上游失敗時有快取 → 回快取並標 stale;無快取 → 丟 UpstreamUnavailable（502）。
- */
 const MIN_POINTS = 60;
 
 /** 全期間（整條序列）摘要,供 /api/screen 帶出;不受請求 from/to 影響。 */
@@ -67,6 +74,11 @@ async function persist(db: D1Database, fundId: string, points: SeriesPoint[], fe
   return { points, start, end, fetched_at, stale: false };
 }
 
+/**
+ * 取得含息序列：快取新鮮則直接用,否則整條重抓並存檔。
+ * 上游失敗時有快取 → 回快取並標 stale;無快取 → 丟 UpstreamUnavailable（502）。
+ * 鉅亨格式不符另行處理:有快取 → 帶格式變動 warning;無快取 → 原樣丟出 AnueSchemaError（路由回 502）。
+ */
 export async function loadSeries(
   env: Env,
   fund: { fund_id: string; setup_date?: string | null },
@@ -92,7 +104,7 @@ export async function loadSeries(
       }
       // 接不上 → 落到整條重抓
     } catch (e) {
-      return fromCache(cached, true, `增量更新失敗,沿用快取: ${msg(e)}`);
+      return fromCache(cached, true, fallbackWarning(e, "增量更新失敗,沿用快取"));
     }
   }
 
@@ -107,7 +119,11 @@ export async function loadSeries(
     }
     return await persist(db, fund.fund_id, points, new Date().toISOString());
   } catch (e) {
-    if (cached) return fromCache(cached, true, `上游失敗,沿用快取: ${msg(e)}`);
+    if (cached) return fromCache(cached, true, fallbackWarning(e, "上游失敗,沿用快取"));
+    if (e instanceof AnueSchemaError) {
+      console.error("anue schema mismatch (recovery, no cache)", e.message);
+      throw e;
+    }
     throw new UpstreamUnavailable(msg(e));
   }
 }
