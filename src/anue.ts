@@ -99,7 +99,7 @@ export async function fetchAllFunds(
 
 interface AnueConditionGroup {
   groupID: string;
-  parameters?: { parameterValue: string }[];
+  values?: { value: string }[];
 }
 interface AreaResponse {
   succ: boolean;
@@ -130,7 +130,7 @@ export function parseAreaList(
   data: { condition?: { groups?: AnueConditionGroup[] } } | null | undefined,
 ): string[] {
   const g = data?.condition?.groups?.find((x) => x.groupID === "InvestmentArea");
-  return (g?.parameters ?? []).map((p) => p.parameterValue).filter(Boolean);
+  return (g?.values ?? []).map((v) => v.value).filter(Boolean);
 }
 
 /** 由各區域的 fundIDs 建立 fund_id → area 對照；一檔多區域取第一個並記 warning。 */

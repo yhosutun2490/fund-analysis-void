@@ -11,16 +11,14 @@ describe("parseFundIDs", () => {
   });
 });
 
+// 實測結構(2026-10-22):groups[] = { groupID, groupName, special, values: [{ sort, value }] }
+const group = (groupID: string, values: string[]) => ({
+  groupID, groupName: groupID, special: false, values: values.map((value, i) => ({ sort: i, value })),
+});
+
 describe("parseAreaList — 取自 condition.groups,不寫死", () => {
-  it("擷取 InvestmentArea 的 parameterValue 清單", () => {
-    const data = {
-      condition: {
-        groups: [
-          { groupID: "AssetType", parameters: [{ parameterValue: "股票型" }] },
-          { groupID: "InvestmentArea", parameters: [{ parameterValue: "全球" }, { parameterValue: "亞洲" }] },
-        ],
-      },
-    };
+  it("擷取 InvestmentArea 的 values[].value 清單", () => {
+    const data = { condition: { groups: [group("AssetType", ["股票型"]), group("InvestmentArea", ["全球", "亞洲"])] } };
     expect(parseAreaList(data)).toEqual(["全球", "亞洲"]);
   });
   it("找不到 InvestmentArea → []", () => {
@@ -68,7 +66,7 @@ describe("fetchInvestmentAreaMap — 單區失敗不拋出", () => {
         return {
           succ: true,
           code: "00000",
-          data: { fundIDs: "", condition: { groups: [{ groupID: "InvestmentArea", parameters: [{ parameterValue: "亞洲" }, { parameterValue: "歐洲" }] }] } },
+          data: { fundIDs: "", condition: { groups: [group("InvestmentArea", ["亞洲", "歐洲"])] } },
         };
       }
       const area = body.condition[0].parameterValue;
