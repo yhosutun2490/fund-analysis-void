@@ -1,26 +1,8 @@
 import { type AnyColumn, and, asc, count, desc, eq, gte, inArray, lte, max, type SQL, sql } from "drizzle-orm";
 import { makeDb } from "../db/client";
 import { fundRisk, funds, fundSeries } from "../db/schema";
+import { categoryCols, fundCols, fundListCols, riskCols } from "../db/selections";
 import type { ScreenRow } from "../screen";
-
-// funds 全欄位 → snake_case（維持 getFund 的既有 SELECT * 形狀）
-const fundCols = {
-  fund_id: funds.fundId, isin: funds.isin, lipper_id: funds.lipperId, name: funds.name,
-  fund_group: funds.fundGroup, category: funds.category, currency: funds.currency,
-  domicile: funds.domicile, investment_area: funds.investmentArea, rr: funds.rr,
-  esg_score: funds.esgScore, setup_date: funds.setupDate, aum_twd: funds.aumTwd, updated_at: funds.updatedAt,
-} as const;
-
-// fund_risk 全欄位 → snake_case
-const riskCols = {
-  fund_id: fundRisk.fundId, as_of: fundRisk.asOf, std_1y: fundRisk.std1y,
-  sharpe_1y: fundRisk.sharpe1y, sharpe_3y: fundRisk.sharpe3y, sharpe_5y: fundRisk.sharpe5y, sharpe_10y: fundRisk.sharpe10y,
-  ret_3m: fundRisk.ret3m, ret_6m: fundRisk.ret6m, ret_1y: fundRisk.ret1y, ret_3y: fundRisk.ret3y, ret_5y: fundRisk.ret5y,
-  roi_y1: fundRisk.roiY1, roi_y2: fundRisk.roiY2, roi_y3: fundRisk.roiY3, roi_y4: fundRisk.roiY4, roi_y5: fundRisk.roiY5,
-  maxdrop_y1: fundRisk.maxdropY1, maxdrop_y2: fundRisk.maxdropY2, maxdrop_y3: fundRisk.maxdropY3,
-  maxdrop_y4: fundRisk.maxdropY4, maxdrop_y5: fundRisk.maxdropY5,
-  lipper_total: fundRisk.lipperTotal, nav: fundRisk.nav, nav_date: fundRisk.navDate, ingested_at: fundRisk.ingestedAt,
-} as const;
 
 export interface FundListQuery {
   group?: string;
@@ -71,15 +53,7 @@ export async function listFunds(db: D1Database, q: FundListQuery) {
 
   return drizzle
     .with(latest)
-    .select({
-      fund_id: funds.fundId, name: funds.name, fund_group: funds.fundGroup, category: funds.category,
-      currency: funds.currency, domicile: funds.domicile, rr: funds.rr, esg_score: funds.esgScore,
-      aum_twd: funds.aumTwd, setup_date: funds.setupDate,
-      as_of: fundRisk.asOf, std_1y: fundRisk.std1y, sharpe_1y: fundRisk.sharpe1y, sharpe_3y: fundRisk.sharpe3y,
-      sharpe_5y: fundRisk.sharpe5y, sharpe_10y: fundRisk.sharpe10y, ret_1y: fundRisk.ret1y, ret_3y: fundRisk.ret3y,
-      ret_5y: fundRisk.ret5y, maxdrop_y1: fundRisk.maxdropY1, lipper_total: fundRisk.lipperTotal,
-      nav: fundRisk.nav, nav_date: fundRisk.navDate,
-    })
+    .select(fundListCols)
     .from(funds)
     .innerJoin(latest, eq(latest.fundId, funds.fundId))
     .innerJoin(fundRisk, and(eq(fundRisk.fundId, funds.fundId), eq(fundRisk.asOf, latest.latestAsOf)))
@@ -161,7 +135,7 @@ export async function getRiskHistory(db: D1Database, id: string) {
 
 export async function listCategories(db: D1Database) {
   return makeDb(db)
-    .select({ category: funds.category, fund_group: funds.fundGroup, n: count() })
+    .select({ ...categoryCols, n: count() })
     .from(funds)
     .where(sql`${funds.category} is not null`)
     .groupBy(funds.category)

@@ -4,7 +4,8 @@ import { DISCLAIMER } from "../disclaimer";
 import type { Env } from "../bindings";
 import { listFullGroups, listMatchedKeys, type ScreenFilters } from "../repositories/funds";
 import { screenGroups, type Window } from "../screen";
-import { csvList, rangeNum, splitCsv, validate } from "../validation";
+import { ErrorResponse, ScreenResponse } from "../responses";
+import { csvList, rangeNum, responds, splitCsv, validate } from "../validation";
 
 export const screen = new Hono<{ Bindings: Env }>();
 
@@ -34,7 +35,7 @@ const ScreenQuery = z
   .refine((q) => q.category || q.area || q.group, { error: "category / area / group 至少擇一（決定篩選範圍）" });
 
 // 快照初篩：範圍篩選決定回傳哪些基金;百分位永遠以完整 (category,currency) 組計算
-screen.get("/", validate("query", ScreenQuery), async (c) => {
+screen.get("/", responds({ 200: ScreenResponse, 400: ErrorResponse }), validate("query", ScreenQuery), async (c) => {
   const { minSharpePct, minDropPct, minWins, weakPct, weakWindows, limit, ...q } = c.req.valid("query");
   const filters: ScreenFilters = {
     categories: q.category,

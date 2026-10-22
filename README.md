@@ -51,7 +51,13 @@ npm run deploy
 ### Secrets / 環境變數
 
 - `DISCORD_WEBHOOK_URL`（secret,選用）：cron ingest **失敗**（🔴）或**成功但帶 warning**（🟡,如鉅亨新增欄位、投資區域警告）時發 Discord 通知;乾淨成功不送。未設定即停用。
-  線上以 `npx wrangler secret put DISCORD_WEBHOOK_URL --name fund-risks-analysis` 設定,本機寫在 `.dev.vars`（已 gitignore）;不要寫進 `void.config.ts` 的 `vars`。
+  線上以 `npx wrangler secret put DISCORD_WEBHOOK_URL --name fund-risks-analysis` 設定（Worker secret,由 env binding 讀取）;不要寫進 `void.config.ts` 的 `vars`。本機 dev 預設不設,即不送通知。
+
+### 驗證
+
+- **請求**：各路由以 zod 宣告 query/param 契約（`src/routes/*`）,不合法 → `400 { error }`。
+- **回應**：各路由成功回應對 `src/responses.ts` 的 schema 驗證（DB 列由 Drizzle 衍生）。`vite dev` / 測試中不符即 500（大聲失敗）;正式建置（`import.meta.env.PROD`）只記 log、照常回傳。
+- **上游鉅亨**：回應以 zod 驗證。破壞性變動 → 抓取失敗、`ingest_runs` 記 `status:error`;多出未知欄位 → 記 warning（`src/anueKnownKeys.ts` 為已知欄位快照,確認無害後補進清單即可）。
 
 ## 端點
 

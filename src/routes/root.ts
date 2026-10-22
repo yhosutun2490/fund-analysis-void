@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import { DISCLAIMER } from "../disclaimer";
 import type { Env } from "../bindings";
+import { RootResponse } from "../responses";
+import { responds } from "../validation";
 
 // 以方法鏈定義,讓 GET / 的回應型別被 typeof root 捕捉,testClient 才推得出來
-export const root = new Hono<{ Bindings: Env }>().get("/", (c) =>
+export const root = new Hono<{ Bindings: Env }>().get("/", responds({ 200: RootResponse }), (c) =>
   c.json({
     name: "fund-risks-analysis",
     kind: "private/internal tool",

@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import type { FundRecord } from "../anue";
 import { makeDb } from "../db/client";
 import { fundRisk, funds, ingestRuns } from "../db/schema";
+import { runCols } from "../db/selections";
 
 /** 把一批正規化記錄寫入 D1。funds 覆蓋更新;fund_risk 以 (fund_id, as_of) upsert 累積月歷史。 */
 export async function upsertRecords(db: D1Database, records: FundRecord[]): Promise<number> {
@@ -79,11 +80,7 @@ export async function recordRun(
 
 export async function listRuns(db: D1Database) {
   return makeDb(db)
-    .select({
-      id: ingestRuns.id, started_at: ingestRuns.startedAt, finished_at: ingestRuns.finishedAt,
-      data_time: ingestRuns.dataTime, total_count: ingestRuns.totalCount, upserted: ingestRuns.upserted,
-      status: ingestRuns.status, note: ingestRuns.note,
-    })
+    .select(runCols)
     .from(ingestRuns)
     .orderBy(desc(ingestRuns.id))
     .limit(20);
