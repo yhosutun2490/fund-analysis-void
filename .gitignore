@@ -14,3 +14,6 @@ docs/
 
 # Void 產生的型別與本機狀態
 .void/
+
+# Claude Code 本機設定
+.claude/settings.local.json
