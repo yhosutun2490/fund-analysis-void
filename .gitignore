@@ -17,3 +17,11 @@ docs/
 
 # Claude Code 本機設定
 .claude/settings.local.json
+
+# /teach 教學工作區,本機學習筆記,不入庫(NOTES.md 例外,見下方,要追蹤)
+MISSION.md
+RESOURCES.md
+lessons/
+reference/
+learning-records/
+assets/
