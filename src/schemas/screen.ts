@@ -99,7 +99,7 @@ export const ScreenResponse = z.strictObject({
     minDropPct: z.number(),
     minWins: z.number(),
     weakPct: z.number(),
-    weakWindows: z.array(z.enum(["3m", "6m", "1y"])),
+    weakWindows: z.array(z.enum(WINDOWS)),
   }),
   basis: z.literal("anue_year_fields_unverified"),
   disclaimer,

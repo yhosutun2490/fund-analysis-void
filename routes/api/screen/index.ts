@@ -10,14 +10,14 @@ import { responds } from "../../../src/validation";
 export const GET = responds(
   { 200: ScreenResponse, 400: ValidationErrorResponse },
   defineHandler.withValidator({ query: ScreenQuery })(async (c, { query }) => {
-    const { minSharpePct, minDropPct, minWins, weakPct, weakWindows, limit, ...q } = query;
+    const { category, area, group, domicile, currency, maxRr, limit, ...params } = query;
     const filters: ScreenFilters = {
-      categories: q.category,
-      areas: q.area,
-      groups: q.group,
-      domiciles: q.domicile,
-      currencies: q.currency,
-      maxRr: q.maxRr,
+      categories: category,
+      areas: area,
+      groups: group,
+      domiciles: domicile,
+      currencies: currency,
+      maxRr,
     };
 
     // 1) 篩選出命中的基金 → matched 集合與涉及的 categories
@@ -27,14 +27,12 @@ export const GET = responds(
 
     // 2) 以完整組（按 category 取,不套其他篩選）計算百分位,只保留有命中的組
     const fullRows = await listFullGroups(c.env.DB, categories);
-    const groups = screenGroups(fullRows, { minSharpePct, minDropPct, minWins, weakPct, weakWindows }, matchedIds).map(
-      (g) => ({ ...g, passed: g.passed.slice(0, limit) }),
-    );
+    const groups = screenGroups(fullRows, params, matchedIds).map((g) => ({ ...g, passed: g.passed.slice(0, limit) }));
 
     return c.json({
       filters,
       groups,
-      params: { minSharpePct, minDropPct, minWins, weakPct, weakWindows },
+      params,
       basis: "anue_year_fields_unverified",
       disclaimer: DISCLAIMER,
     });
