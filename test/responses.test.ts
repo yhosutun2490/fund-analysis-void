@@ -193,4 +193,35 @@ describe("回應違反自身 schema", () => {
     expect(log.mock.calls.flat().join(" ")).toMatch(/response schema.*\/api\/funds\/:id/);
     log.mockRestore();
   });
+
+  // 原生路由檔以 defineHandler(responds(...), handler) 組合,同樣要擋得住漂移
+  const driftedRun = { id: 1, started_at: "t0", finished_at: "t1", data_time: null, total_count: 0, upserted: 0, status: "ok", note: null, extra: 1 };
+
+  it("非正式環境:GET /api/meta/runs 回應漂移 → 500", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(listRuns).mockResolvedValue([driftedRun] as never);
+    const res = await get("/api/meta/runs");
+    expect(res.status).toBe(500);
+    log.mockRestore();
+  });
+
+  it("正式環境:GET /api/meta/runs 回應漂移 → 照常回傳,記錄路由", async () => {
+    vi.stubEnv("PROD", true);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(listRuns).mockResolvedValue([driftedRun] as never);
+    const res = await get("/api/meta/runs");
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { runs: { extra: number }[] }).runs[0].extra).toBe(1);
+    expect(log.mock.calls.flat().join(" ")).toMatch(/response schema mismatch GET \/api\/meta\/runs 200/);
+    log.mockRestore();
+  });
+
+  it("非正式環境:POST /admin/ingest 成功 payload 漂移 → 500(非 handler 自己的錯誤 JSON)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(runIngest).mockResolvedValue({ status: "ok" } as never); // 缺 dataTime 等欄位
+    const res = await request("/admin/ingest", { method: "POST" }, env);
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type") ?? "").not.toContain("application/json");
+    log.mockRestore();
+  });
 });
