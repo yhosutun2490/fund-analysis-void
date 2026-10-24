@@ -13,7 +13,7 @@ vi.mock("../src/repositories/ingest", () => ({ listRuns: vi.fn() }));
 vi.mock("../src/services/ingest", () => ({ runIngest: vi.fn() }));
 vi.mock("../src/services/recovery", async (orig) => ({ ...(await orig()), loadSeries: vi.fn() }));
 
-import { app } from "../src/app";
+import { request } from "./entry";
 import { DISCLAIMER } from "../src/disclaimer";
 import {
   getFund, getLatestRisk, getRiskHistory, listCategories, listFullGroups, listFunds, listMatchedKeys,
@@ -31,7 +31,7 @@ import { runIngest } from "../src/services/ingest";
 import { loadSeries } from "../src/services/recovery";
 
 const env = { DB: {} as D1Database };
-const get = (path: string) => app.request(path, {}, env);
+const get = (path: string) => request(path, {}, env);
 
 // 與 D1 經 drizzle 取回的形狀一致(snake_case 別名;nullable 欄可為 null)
 const fundRow = {
@@ -152,10 +152,10 @@ describe("成功回應符合各路由的 response schema", () => {
     vi.mocked(runIngest)
       .mockResolvedValueOnce({ status: "ok", dataTime: "2026-10-22", dataCount: 1, fetched: 1, upserted: 1, note: undefined })
       .mockRejectedValueOnce(new Error("Anue HTTP 500"));
-    const ok = await app.request("/admin/ingest", { method: "POST" }, env);
+    const ok = await request("/admin/ingest", { method: "POST" }, env);
     expect(ok.status).toBe(200);
     AdminIngestOk.parse(await ok.json());
-    const err = await app.request("/admin/ingest", { method: "POST" }, env);
+    const err = await request("/admin/ingest", { method: "POST" }, env);
     expect(err.status).toBe(500);
     expect(AdminIngestError.parse(await err.json()).message).toBe("Anue HTTP 500");
   });
