@@ -10,14 +10,14 @@ vi.mock("../src/repositories/funds", () => ({
   getLatestRisk: vi.fn().mockResolvedValue(null),
 }));
 
-import { app } from "../src/app";
+import { request } from "./entry";
 import { AnueSchemaError } from "../src/anueSchema";
 import { fetchTotalReturnSeries } from "../src/anuePrice";
 import { getFund, getLatestRisk } from "../src/repositories/funds";
 import { getSeries, saveSeries } from "../src/repositories/series";
 
 const env = { DB: {} as D1Database };
-const req = (path: string) => app.request(path, {}, env);
+const req = (path: string) => request(path, {}, env);
 
 // 由月序列產生 n 點,中途回撤後回復
 function series(n: number): [string, number][] {
