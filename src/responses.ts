@@ -1,34 +1,9 @@
 // 各路由成功（與已知錯誤）回應的 zod schema = API 輸出契約的唯一真相來源。
-// DB 列的部分由 Drizzle schema 衍生（drizzle-zod）,再補上非 DB 欄位（disclaimer、計算欄、包裝）。
+// DB 列的部分由 select 子句衍生（rowOf,見 src/db/selections.ts）,再補上非 DB 欄位（disclaimer、計算欄、包裝）。
 // 描述的是既有輸出形狀,不改名、不增減欄位;strictObject 讓改名/多漏欄位都會被抓到。
-import { type Column, getTableColumns, type Table } from "drizzle-orm";
-import { createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
-import { categoryCols, fundCols, fundListCols, riskCols, runCols } from "./db/selections";
+import { categoryCols, fundCols, fundListCols, riskCols, rowOf, runCols } from "./db/selections";
 import { DISCLAIMER } from "./disclaimer";
-
-// ── Drizzle 衍生 ────────────────────────────────────────────────
-
-// createSelectSchema 以 TS 屬性名（camelCase）為鍵;改以 Column 物件索引,供 snake_case 別名查詢
-const columnSchemas = new WeakMap<Table, Map<Column, z.ZodType>>();
-
-function columnSchema(col: Column): z.ZodType {
-  let byCol = columnSchemas.get(col.table);
-  if (!byCol) {
-    const shape = createSelectSchema(col.table).shape as Record<string, z.ZodType>;
-    byCol = new Map(Object.entries(getTableColumns(col.table)).map(([key, c]) => [c, shape[key]]));
-    columnSchemas.set(col.table, byCol);
-  }
-  return byCol.get(col)!;
-}
-
-/** 由 snake_case 選欄（別名 → Drizzle 欄位）衍生一列的 schema。 */
-const rowOf = <S extends Record<string, Column>>(selection: S) =>
-  z.strictObject(
-    Object.fromEntries(Object.entries(selection).map(([alias, col]) => [alias, columnSchema(col)])) as {
-      [K in keyof S]: z.ZodType;
-    },
-  );
 
 // ── 共用片段 ───────────────────────────────────────────────────
 
