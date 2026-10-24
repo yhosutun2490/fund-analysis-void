@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { request } from "./entry";
+import { ValidationErrorResponse } from "../src/schemas/shared";
 
 // 空結果 D1:讓通過驗證的請求能跑到底(不連真 DB)。
 // drizzle-d1 的 all() 底層走 raw(),故 stub 需自我回傳並提供 raw/all/run/first。
@@ -77,14 +78,14 @@ describe("worker http surface", () => {
   });
 });
 
-// 400 + 一致的 { error } 形狀,訊息點名參數與有效範圍
+// 400 + Void 的標準形狀;issues 裡要有一則訊息同時點名參數與有效範圍
 async function expect400(path: string, ...mentions: string[]) {
   const res = await request(path, {}, env);
   expect(res.status).toBe(400);
-  const body = (await res.json()) as Record<string, unknown>;
-  expect(Object.keys(body)).toEqual(["error"]);
-  expect(typeof body.error).toBe("string");
-  for (const m of mentions) expect(body.error).toContain(m);
+  const body = ValidationErrorResponse.parse(await res.json());
+  const messages = body.issues.flatMap((slot) => slot.issues.map((i) => i.message));
+  const hit = messages.find((msg) => mentions.every((m) => msg.includes(m)));
+  expect(hit, `issues: ${messages.join(" | ")}`).toBeDefined();
 }
 
 async function ok(path: string) {

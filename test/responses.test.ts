@@ -24,7 +24,7 @@ import { FundDetailResponse, FundHistoryResponse, FundListResponse, RecoveryResp
 import { CategoriesResponse, RunsResponse } from "../src/schemas/meta";
 import { RootResponse } from "../src/schemas/root";
 import { ScreenResponse } from "../src/schemas/screen";
-import { ErrorResponse } from "../src/schemas/shared";
+import { ErrorResponse, ValidationErrorResponse } from "../src/schemas/shared";
 import type { SeriesPoint } from "../src/recovery";
 import type { ScreenRow } from "../src/screen";
 import { runIngest } from "../src/services/ingest";
@@ -160,11 +160,12 @@ describe("成功回應符合各路由的 response schema", () => {
     expect(AdminIngestError.parse(await err.json()).message).toBe("Anue HTTP 500");
   });
 
-  it("請求錯誤一律為 { error } 形狀", async () => {
+  it("請求驗證錯誤(400)為 Void 標準形狀;404 仍為 { error }", async () => {
     vi.mocked(getFund).mockResolvedValue(null as never);
-    for (const path of ["/api/screen", "/api/funds?limit=abc", "/api/funds/NOPE"]) {
-      ErrorResponse.parse(await (await get(path)).json());
+    for (const path of ["/api/screen", "/api/funds?limit=abc"]) {
+      ValidationErrorResponse.parse(await (await get(path)).json());
     }
+    ErrorResponse.parse(await (await get("/api/funds/NOPE")).json());
   });
 });
 
