@@ -15,6 +15,7 @@ import { AnueSchemaError } from "../src/anueSchema";
 import { fetchTotalReturnSeries } from "../src/anuePrice";
 import { getFund, getLatestRisk } from "../src/repositories/funds";
 import { getSeries, saveSeries } from "../src/repositories/series";
+import { ValidationErrorResponse } from "../src/schemas/shared";
 
 const env = { DB: {} as D1Database };
 const req = (path: string) => request(path, {}, env);
@@ -189,10 +190,12 @@ describe("GET /api/funds/:id/recovery — 請求驗證", () => {
     vi.mocked(getSeries).mockResolvedValue(freshCache as never);
   });
 
+  // Void 會列出所有失敗的 issue → 回傳全部訊息,由案例斷言其中包含預期的那則
   async function error400(path: string) {
     const res = await req(path);
     expect(res.status).toBe(400);
-    return ((await res.json()) as { error: string }).error;
+    const body = ValidationErrorResponse.parse(await res.json());
+    return body.issues.flatMap((slot) => slot.issues.map((i) => i.message));
   }
 
   it.each([
@@ -203,7 +206,7 @@ describe("GET /api/funds/:id/recovery — 請求驗證", () => {
     ["to=20260101", "to 須為 YYYY-MM-DD"],
     ["from=2026-01-02&to=2026-01-01", "from 不可晚於 to"],
   ])("%s → 400「%s」", async (qs, msg) => {
-    expect(await error400(`/api/funds/V1/recovery?${qs}`)).toBe(msg);
+    expect(await error400(`/api/funds/V1/recovery?${qs}`)).toContain(msg);
   });
 
   it.each(["minDepth=0.5", "minDepth=99.5", "from=2020-01-01&to=2020-01-01"])("邊界值 %s 接受", async (qs) => {

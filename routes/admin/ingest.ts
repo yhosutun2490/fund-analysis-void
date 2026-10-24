@@ -4,10 +4,13 @@ import { AdminIngestError, AdminIngestOk } from "../../src/schemas/admin";
 import { runIngest } from "../../src/services/ingest";
 import { responds } from "../../src/validation";
 
-export const POST = defineHandler(responds({ 200: AdminIngestOk, 500: AdminIngestError }), async (c) => {
-  try {
-    return c.json(await runIngest(c.env));
-  } catch (e) {
-    return c.json({ status: "error", message: e instanceof Error ? e.message : String(e) }, 500);
-  }
-});
+export const POST = responds(
+  { 200: AdminIngestOk, 500: AdminIngestError },
+  defineHandler(async (c) => {
+    try {
+      return c.json(await runIngest(c.env));
+    } catch (e) {
+      return c.json({ status: "error", message: e instanceof Error ? e.message : String(e) }, 500);
+    }
+  }),
+);
