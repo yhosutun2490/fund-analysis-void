@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { z } from "zod";
 import { AnueSchemaError } from "../anueSchema";
 import { DISCLAIMER } from "../disclaimer";
 import type { Env } from "../bindings";
@@ -7,56 +6,14 @@ import { computeEpisodes, computeEvents, computeLumpSum, computeMdd, recentRetur
 import { getFund, getLatestRisk, getRiskHistory, listFunds } from "../repositories/funds";
 import { loadSeries, UpstreamUnavailable } from "../services/recovery";
 import {
-  ErrorResponse, FundDetailResponse, FundHistoryResponse, FundListResponse, RecoveryResponse,
-} from "../responses";
-import { blankAsMissing, finiteNum, isoDate, nonNegInt, responds, validate } from "../validation";
+  FundDetailResponse, FundHistoryResponse, FundIdParam, FundListQuery, FundListResponse, RecoveryQuery, RecoveryResponse,
+} from "../schemas/funds";
+import { ErrorResponse } from "../schemas/shared";
+import { responds, validate } from "../validation";
 
 export const funds = new Hono<{ Bindings: Env }>();
 
 const MIN_POINTS = 60;
-
-/** /api/funds 的輸入契約。limit 超過 500 夾到 500;空值參數視同未給;未知 sort 由 repository 回退 sharpe_3y。 */
-const FundListQuery = z.object({
-  group: z.string().optional(),
-  category: z.string().optional(),
-  currency: z.string().optional(),
-  rr: z.string().optional(),
-  domicile: z.string().optional(),
-  minSharpe3y: blankAsMissing(finiteNum("minSharpe3y").optional()),
-  maxStd1y: blankAsMissing(finiteNum("maxStd1y").optional()),
-  sort: z.string().optional(),
-  order: blankAsMissing(
-    z
-      .string()
-      .toLowerCase()
-      .pipe(z.enum(["asc", "desc"], { error: "order 僅允許 asc/desc" }))
-      .default("desc"),
-  ),
-  limit: nonNegInt("limit")
-    .default(50)
-    .transform((n) => Math.min(n, 500)),
-  offset: nonNegInt("offset").default(0),
-});
-
-const FundIdParam = z.object({ id: z.string().min(1) });
-
-/** /api/funds/:id/recovery 的輸入契約。 */
-const minDepthError = "minDepth 須在 (0,100)";
-const RecoveryQuery = z
-  .object({
-    from: isoDate("from").optional(),
-    to: isoDate("to").optional(),
-    minDepth: z.coerce
-      .number({ error: minDepthError })
-      .gt(0, { error: minDepthError })
-      .lt(100, { error: minDepthError })
-      .default(10),
-    refresh: z
-      .string()
-      .optional()
-      .transform((v) => v === "true"),
-  })
-  .refine((q) => !(q.from && q.to && q.from > q.to), { error: "from 不可晚於 to" });
 
 // 基金清單 + 篩選 + 排序（以最新快照）
 funds.get("/", responds({ 200: FundListResponse, 400: ErrorResponse }), validate("query", FundListQuery), async (c) => {

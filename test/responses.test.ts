@@ -19,10 +19,12 @@ import {
   getFund, getLatestRisk, getRiskHistory, listCategories, listFullGroups, listFunds, listMatchedKeys,
 } from "../src/repositories/funds";
 import { listRuns } from "../src/repositories/ingest";
-import {
-  AdminIngestError, AdminIngestOk, CategoriesResponse, ErrorResponse, FundDetailResponse, FundHistoryResponse,
-  FundListResponse, RecoveryResponse, RootResponse, RunsResponse, ScreenResponse,
-} from "../src/responses";
+import { AdminIngestError, AdminIngestOk } from "../src/schemas/admin";
+import { FundDetailResponse, FundHistoryResponse, FundListResponse, RecoveryResponse } from "../src/schemas/funds";
+import { CategoriesResponse, RunsResponse } from "../src/schemas/meta";
+import { RootResponse } from "../src/schemas/root";
+import { ScreenResponse } from "../src/schemas/screen";
+import { ErrorResponse } from "../src/schemas/shared";
 import type { SeriesPoint } from "../src/recovery";
 import type { ScreenRow } from "../src/screen";
 import { runIngest } from "../src/services/ingest";

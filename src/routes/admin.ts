@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../bindings";
-import { AdminIngestError, AdminIngestOk } from "../responses";
+import { AdminIngestError, AdminIngestOk } from "../schemas/admin";
 import { runIngest } from "../services/ingest";
 import { responds } from "../validation";
 
