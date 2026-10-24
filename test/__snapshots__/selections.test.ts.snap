@@ -1,0 +1,769 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`rowOf：select 子句 → 一列的 schema > categoryCols 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "category": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "fund_group": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+  },
+  "required": [
+    "category",
+    "fund_group",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`rowOf：select 子句 → 一列的 schema > fundCols 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "aum_twd": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "category": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "currency": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "domicile": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "esg_score": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "fund_group": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "fund_id": {
+      "type": "string",
+    },
+    "investment_area": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "isin": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "lipper_id": {
+      "anyOf": [
+        {
+          "maximum": 9007199254740991,
+          "minimum": -9007199254740991,
+          "type": "integer",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "name": {
+      "type": "string",
+    },
+    "rr": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "setup_date": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "updated_at": {
+      "type": "string",
+    },
+  },
+  "required": [
+    "fund_id",
+    "isin",
+    "lipper_id",
+    "name",
+    "fund_group",
+    "category",
+    "currency",
+    "domicile",
+    "investment_area",
+    "rr",
+    "esg_score",
+    "setup_date",
+    "aum_twd",
+    "updated_at",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`rowOf：select 子句 → 一列的 schema > fundListCols 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "as_of": {
+      "type": "string",
+    },
+    "aum_twd": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "category": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "currency": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "domicile": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "esg_score": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "fund_group": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "fund_id": {
+      "type": "string",
+    },
+    "lipper_total": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "maxdrop_y1": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "name": {
+      "type": "string",
+    },
+    "nav": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "nav_date": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "ret_1y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "ret_3y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "ret_5y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "rr": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "setup_date": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "sharpe_10y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "sharpe_1y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "sharpe_3y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "sharpe_5y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "std_1y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+  },
+  "required": [
+    "fund_id",
+    "name",
+    "fund_group",
+    "category",
+    "currency",
+    "domicile",
+    "rr",
+    "esg_score",
+    "aum_twd",
+    "setup_date",
+    "as_of",
+    "std_1y",
+    "sharpe_1y",
+    "sharpe_3y",
+    "sharpe_5y",
+    "sharpe_10y",
+    "ret_1y",
+    "ret_3y",
+    "ret_5y",
+    "maxdrop_y1",
+    "lipper_total",
+    "nav",
+    "nav_date",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`rowOf：select 子句 → 一列的 schema > riskCols 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "as_of": {
+      "type": "string",
+    },
+    "fund_id": {
+      "type": "string",
+    },
+    "ingested_at": {
+      "type": "string",
+    },
+    "lipper_total": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "maxdrop_y1": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "maxdrop_y2": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "maxdrop_y3": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "maxdrop_y4": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "maxdrop_y5": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "nav": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "nav_date": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "ret_1y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "ret_3m": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "ret_3y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "ret_5y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "ret_6m": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "roi_y1": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "roi_y2": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "roi_y3": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "roi_y4": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "roi_y5": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "sharpe_10y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "sharpe_1y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "sharpe_3y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "sharpe_5y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "std_1y": {
+      "anyOf": [
+        {
+          "maximum": 140737488355327,
+          "minimum": -140737488355328,
+          "type": "number",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+  },
+  "required": [
+    "fund_id",
+    "as_of",
+    "std_1y",
+    "sharpe_1y",
+    "sharpe_3y",
+    "sharpe_5y",
+    "sharpe_10y",
+    "ret_3m",
+    "ret_6m",
+    "ret_1y",
+    "ret_3y",
+    "ret_5y",
+    "roi_y1",
+    "roi_y2",
+    "roi_y3",
+    "roi_y4",
+    "roi_y5",
+    "maxdrop_y1",
+    "maxdrop_y2",
+    "maxdrop_y3",
+    "maxdrop_y4",
+    "maxdrop_y5",
+    "lipper_total",
+    "nav",
+    "nav_date",
+    "ingested_at",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`rowOf：select 子句 → 一列的 schema > runCols 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "data_time": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "finished_at": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "id": {
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer",
+    },
+    "note": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "started_at": {
+      "type": "string",
+    },
+    "status": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "total_count": {
+      "anyOf": [
+        {
+          "maximum": 9007199254740991,
+          "minimum": -9007199254740991,
+          "type": "integer",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+    "upserted": {
+      "anyOf": [
+        {
+          "maximum": 9007199254740991,
+          "minimum": -9007199254740991,
+          "type": "integer",
+        },
+        {
+          "type": "null",
+        },
+      ],
+    },
+  },
+  "required": [
+    "id",
+    "started_at",
+    "finished_at",
+    "data_time",
+    "total_count",
+    "upserted",
+    "status",
+    "note",
+  ],
+  "type": "object",
+}
+`;

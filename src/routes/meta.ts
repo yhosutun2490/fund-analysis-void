@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../bindings";
 import { listCategories } from "../repositories/funds";
 import { listRuns } from "../repositories/ingest";
-import { CategoriesResponse, RunsResponse } from "../responses";
+import { CategoriesResponse, RunsResponse } from "../schemas/meta";
 import { responds } from "../validation";
 
 export const meta = new Hono<{ Bindings: Env }>();
