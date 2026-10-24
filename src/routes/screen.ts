@@ -1,38 +1,13 @@
 import { Hono } from "hono";
-import { z } from "zod";
 import { DISCLAIMER } from "../disclaimer";
 import type { Env } from "../bindings";
 import { listFullGroups, listMatchedKeys, type ScreenFilters } from "../repositories/funds";
-import { screenGroups, type Window } from "../screen";
-import { ErrorResponse, ScreenResponse } from "../responses";
-import { csvList, rangeNum, responds, splitCsv, validate } from "../validation";
+import { screenGroups } from "../screen";
+import { ScreenQuery, ScreenResponse } from "../schemas/screen";
+import { ErrorResponse } from "../schemas/shared";
+import { responds, validate } from "../validation";
 
 export const screen = new Hono<{ Bindings: Env }>();
-
-const WINDOWS = ["3m", "6m", "1y"] as const satisfies readonly Window[];
-const windowsError = "weakWindows 僅允許 3m/6m/1y（逗號分隔）";
-
-/** /api/screen 的輸入契約。範圍參數至少擇一;數值參數未給用預設。 */
-const ScreenQuery = z
-  .object({
-    category: csvList,
-    area: csvList,
-    group: csvList,
-    domicile: csvList,
-    currency: csvList,
-    maxRr: rangeNum("maxRr", 1, 5).optional(),
-    minSharpePct: rangeNum("minSharpePct", 0, 100).default(50),
-    minDropPct: rangeNum("minDropPct", 0, 100).default(40),
-    minWins: rangeNum("minWins", 0, 5).default(3),
-    weakPct: rangeNum("weakPct", 0, 100).default(40),
-    weakWindows: z
-      .string()
-      .transform(splitCsv)
-      .pipe(z.array(z.enum(WINDOWS, { error: windowsError })).min(1, { error: windowsError }))
-      .default(["6m", "1y"]),
-    limit: rangeNum("limit", 1, 500).default(100),
-  })
-  .refine((q) => q.category || q.area || q.group, { error: "category / area / group 至少擇一（決定篩選範圍）" });
 
 // 快照初篩：範圍篩選決定回傳哪些基金;百分位永遠以完整 (category,currency) 組計算
 screen.get("/", responds({ 200: ScreenResponse, 400: ErrorResponse }), validate("query", ScreenQuery), async (c) => {

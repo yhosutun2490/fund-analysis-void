@@ -1,5 +1,5 @@
 // API 輸出的列形狀（select 子句）:snake_case 別名 → Drizzle 欄位,以及「select 子句 → schema」的 rowOf。
-// repository 以這些 select 子句查詢,回應 schema（src/responses.ts）以 rowOf(select 子句) 衍生,兩邊共用同一份定義,不會漂移。
+// repository 以這些 select 子句查詢,回應 schema（src/schemas/*）以 rowOf(select 子句) 衍生,兩邊共用同一份定義,不會漂移。
 import { type Column, getTableColumns, type Table } from "drizzle-orm";
 import { createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
