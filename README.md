@@ -11,70 +11,132 @@
 
 ## 架構
 
+### 資料流
+
 ```
-Cron (每日)  ─┐
-POST /admin/ingest ─┴─▶ fetchAllFunds() ─▶ normalize(哨兵值→null) ─▶ D1 upsert
-                                                                      │
-   前端 / 你 ───▶ GET /api/*      ◀───────────────────────────────────┘
+                    ┌──────────── 寫入（每日）────────────┐
+Cron 每日 ──────────┤                                      │
+POST /admin/ingest ─┴─▶ services/ingest ─▶ anue/search ─▶ 正規化 ─▶ D1（funds、fund_risk、ingest_runs）
+                                         （鉅亨 Search/Detail）              │
+                                                                             ▼
+GET /api/funds*、/api/screen、/api/meta/* ──▶ repositories ──▶ domain（純計算）──▶ JSON
+GET /api/funds/:id/recovery ──▶ services/recovery ──▶ fund_series 快取 / anue/price（鉅亨含息序列）
 ```
 
-- `src/anue/search.ts`：抓取 + 正規化（`pageSize` 2000、3 頁抓完 4540 檔；`-99999999.9999` → null）
-- `db/schema.ts`：**D1 schema 唯一真相來源（Drizzle）**；型別與 migration 都從它衍生
-- `src/db/client.ts`：`makeDb(env.DB)` 建立帶 schema 的 drizzle 實例
-- `src/repositories/*`：以 Drizzle 查詢（`funds` 覆蓋更新、`fund_risk` 以 `(fund_id, as_of)` 累積月快照）
-- `src/domain/screen.ts`：快照初篩純計算（同組百分位、年度勝率、入選規則；描述性，非建議）
-- `src/anue/price.ts`：鉅亨含息序列抓取（切塊、併發、串接）；`src/domain/recovery.ts`：回撤／近期報酬純計算
-- `src/services/recovery.ts`：序列快取新鮮度 → 抓取／存檔 → 計算；`src/repositories/series.ts`：`fund_series` 讀寫
-- `src/schemas/endpoints.ts`：端點契約登錄表（每個端點的摘要與請求/回應 schema）;路由檔從這裡取 schema 驗證,`src/lib/openapi.ts` 從這裡產生 OpenAPI 文件
-- `routes/`：Void 檔案路由，一個 URL 一個檔（每個 HTTP 方法一個具名 export）；`middleware/01.cors.ts`：`/api/*` 的 CORS
-- `crons/daily-ingest.ts`：每日 cron 排程（與 `/admin/ingest` 共用 `runIngest`;失敗或帶 warning 時通知 Discord）
-- `db/migrations/`：`drizzle-kit generate` 產生的 migration（由 schema.ts 衍生,勿手改）
+### 一個請求怎麼走
+
+```
+請求
+ └─ middleware/01.cors.ts             /api/* 加 CORS(含 preflight)
+     └─ routes/**/*.ts                一個 URL 一個檔,一個 HTTP 方法一個具名 export
+         ├─ withValidator(...)        query/params 驗證 → 不合法回 400
+         ├─ handler                   呼叫 repositories / services / domain
+         └─ responds(...)             依狀態碼驗證回應 schema
+                ▲
+                └── 兩者的 schema 都取自 src/schemas/endpoints.ts(端點契約登錄表)
+                     └─ src/lib/openapi.ts 從同一份登錄表產生 GET /openapi.json
+```
+
+文件和驗證用的是同一個 zod schema 物件,改了 schema,`/openapi.json` 會跟著變。
+
+### 目錄
+
+```
+routes/            Void 檔案路由(GET / 是 Swagger UI、GET /openapi.json 是 OpenAPI 文件)
+middleware/        全域 middleware(01.cors.ts)
+crons/             排程(daily-ingest.ts:與 /admin/ingest 共用 runIngest;失敗或帶 warning 時通知 Discord)
+db/
+├── schema.ts      D1 schema 唯一真相來源(Drizzle);型別與 migration 都從它衍生
+└── migrations/    drizzle-kit generate 產生,勿手改
+src/
+├── schemas/       請求/回應契約(zod);endpoints.ts 是端點契約登錄表
+├── lib/           validation.ts(responds)、openapi.ts(文件產生器)、notify.ts(Discord)
+├── services/      流程編排:ingest(抓取→寫入)、recovery(序列快取新鮮度→抓取/存檔)
+├── repositories/  Drizzle 查詢:funds 覆蓋更新、fund_risk 以 (fund_id, as_of) 累積月快照、fund_series 讀寫
+├── domain/        純計算:screen(同組百分位、年度勝率、入選規則)、recovery(回撤、近期報酬)
+├── anue/          鉅亨上游:search(pageSize 2000、哨兵值 -99999999.9999 → null)、price(含息序列,切塊併發串接)、schema(上游回應驗證)
+└── db/            makeDb(env.DB)、selections(select 子句與由它衍生的列 schema rowOf)
+```
+
+### 驗證
+
+- **請求**：路由從登錄表取 query/params schema,以 `defineHandler.withValidator()` 驗證。不合法 → `400 { error: "Validation failed", issues: [{ slot, issues: [{ message, path }] }] }`(`message` 為 zh-TW 用語)。
+- **回應**：`responds()`(`src/lib/validation.ts`)依狀態碼對登錄表的回應 schema 驗證(DB 列由 Drizzle 衍生)。`vite dev` / 測試中不符即 500(大聲失敗);正式建置(`import.meta.env.PROD`)只記 log、照常回傳。
+- **上游鉅亨**：回應以 zod 驗證。破壞性變動 → 抓取失敗、`ingest_runs` 記 `status:error`;多出未知欄位 → 記 warning(`src/anue/knownKeys.ts` 為已知欄位快照,確認無害後補進清單即可)。
 
 ## 設定與啟動
 
 ```bash
 npm install
 
-# 1. 建立 D1，把回傳的 database_id 填進 wrangler.jsonc
+# 1. 建立 D1,把回傳的 database_id 填進 void.config.ts
 npx wrangler d1 create fund_risks
 
-# 2. 套用 migration（schema 改動後先 npm run db:generate 產生新 migration）
+# 2. 套用 migration(schema 改動後先 npm run db:generate 產生新 migration)
 npm run db:migrate         # 本地
 npm run db:migrate:remote  # 線上
 
 # 3. 本地開發
-npm run dev
-curl -X POST http://localhost:8787/admin/ingest   # 手動抓一次
+npm run dev                # http://localhost:5173/ 即 Swagger UI
+npm run ingest:local       # 手動抓一次(POST /admin/ingest)
 
-# 4. 部署（cron 會自動每日執行）
+# 4. 部署(cron 會自動每日執行)
 npm run deploy
 ```
 
 ### Secrets / 環境變數
 
-- `DISCORD_WEBHOOK_URL`（secret,選用）：cron ingest **失敗**（🔴）或**成功但帶 warning**（🟡,如鉅亨新增欄位、投資區域警告）時發 Discord 通知;乾淨成功不送。未設定即停用。
-  線上以 `npx wrangler secret put DISCORD_WEBHOOK_URL --name fund-risks-analysis` 設定（Worker secret,由 env binding 讀取）;不要寫進 `void.config.ts` 的 `vars`。本機 dev 預設不設,即不送通知。
+- `DISCORD_WEBHOOK_URL`(secret,選用)：cron ingest **失敗**(🔴)或**成功但帶 warning**(🟡,如鉅亨新增欄位、投資區域警告)時發 Discord 通知;乾淨成功不送。未設定即停用。
+  線上以 `npx wrangler secret put DISCORD_WEBHOOK_URL --name fund-risks-analysis` 設定(Worker secret,由 env binding 讀取);不要寫進 `void.config.ts` 的 `vars`。本機 dev 預設不設,即不送通知。
 
-### 驗證
+## API
 
-- **請求**：各路由檔從端點契約登錄表取 query/param schema,以 `defineHandler.withValidator()` 驗證，不合法 → `400 { error: "Validation failed", issues: [{ slot, issues: [{ message, path }] }] }`（`message` 為 zh-TW 用語）。
-- **回應**：各路由回應由 `responds()`（`src/lib/validation.ts`）依狀態碼對登錄表的回應 schema 驗證（DB 列由 Drizzle 衍生）。`vite dev` / 測試中不符即 500（大聲失敗）;正式建置（`import.meta.env.PROD`）只記 log、照常回傳。
-- **上游鉅亨**：回應以 zod 驗證。破壞性變動 → 抓取失敗、`ingest_runs` 記 `status:error`;多出未知欄位 → 記 warning（`src/anue/knownKeys.ts` 為已知欄位快照,確認無害後補進清單即可）。
+### 看文件、試打
 
-## 端點
+- **Swagger UI**：瀏覽器打開服務根路徑 `/`(本地 `npm run dev` 後是 http://localhost:5173/)。每個端點的參數型別、範圍、預設值、範例、回應形狀和錯誤狀態碼都在這裡,可以用「Try it out」直接送出請求。
+- **OpenAPI 3.1**：`GET /openapi.json`,可匯入 Postman 或用來產生 client。
 
-`GET /` 是 Swagger UI,可直接瀏覽與試打;`GET /openapi.json` 是 OpenAPI 3.1 文件,由端點契約登錄表產生,參數型別、範圍、預設值與回應形狀以它為準。下表為摘要。
+參數細節以 Swagger UI 為準,下面只寫文件裡看不出來的行為。
 
-| 方法 | 路徑 | 說明 |
+### 端點一覽
+
+| 方法 | 路徑 | 用途 |
 | --- | --- | --- |
-| POST | `/admin/ingest` | 手動觸發抓取（與 cron 同流程） |
-| GET | `/api/funds` | 清單；query：`group` `category` `currency` `rr` `domicile` `minSharpe3y` `maxStd1y` `sort`(sharpe_3y/std_1y/ret_3y/aum_twd) `order` `limit` `offset` |
-| GET | `/api/funds/:id` | 單檔基本資料（含投資區域 `investment_area`）+ 最新快照（含近 3 個月 `ret_3m`、6 個月 `ret_6m` 報酬） |
-| GET | `/api/funds/:id/history` | 風險指標月歷史（cron 累積） |
-| GET | `/api/funds/:id/recovery` | 回復分析；query：`from` `to`(YYYY-MM-DD 分析窗口)`minDepth`(10,回撤事件門檻 %)`refresh`(true 強制整條重抓)。鉅亨含息序列(`PerformanceHIS`)的最大回撤 `mdd`、歷次回撤清單 `episodes`(深度 ≥ `minDepth`,依深度排序)、預設事件 `events`(2020 疫情/2022 升息/2025 關稅,未覆蓋 → `not_covered`)、單筆進場風險 `lump_sum`(仍虧損進場日比例、最長回本天數含未回本開放區間、持有 1Y/3Y 的虧損機率/最差/中位)與近期含息報酬 `recent`(3M/6M/1Y)。序列快取於 `fund_series`;新鮮用快取、過期只補抓 `[series_end,今天]` 增量串接(接不上則整條重抓)、`refresh=true` 強制整條重抓。比例/報酬皆為**小數**。`from>to`/日期格式錯/`minDepth` 非 (0,100) → 400;未知基金 404、上游失敗無快取 502、有效點<60 回 `series_too_short` |
-| GET | `/api/screen` | 快照初篩；範圍篩選 `category` `area` `group` `domicile` `currency`(皆可多值逗號分隔、同參數 OR、跨參數 AND)`maxRr`(1–5)——`category`/`area`/`group` 至少擇一;規則參數 `minSharpePct`(50) `minDropPct`(40) `minWins`(3) `weakPct`(40) `weakWindows`(6m,1y) `limit`(100)。**篩選只決定回傳哪些基金,百分位永遠以完整 (category,currency) 組計算**。依組算 3Y 夏普／最差年度跌幅組內百分位與年度勝率,套三道門檻篩出 `passed`,列 `rejected_count`、`insufficient`;每組含 `peer_count`(完整組)、`matched_count`(篩選後);每檔附 `ladder`(3M/6M/1Y 報酬組內百分位)、`weak_flag`(三態)與 `recovery`(已用 `/recovery` 分析過的基金帶出全期間摘要:`mdd`/`mdd_recovered`/`mdd_underwater_days`/`still_underwater_ratio`/`loss_prob_1y`/`series_end`,未分析→null);頂層回 `filters` |
-| GET | `/api/meta/categories` | 基金組別清單與檔數 |
+| POST | `/admin/ingest` | 手動觸發抓取(與 cron 同流程) |
+| GET | `/api/funds` | 基金清單 + 篩選 + 排序(以最新快照) |
+| GET | `/api/funds/:id` | 單檔基本資料 + 最新快照 |
+| GET | `/api/funds/:id/history` | 單檔風險指標月歷史(cron 累積) |
+| GET | `/api/funds/:id/recovery` | 單檔回復分析:最大回撤、回撤事件、單筆進場風險、近期報酬 |
+| GET | `/api/screen` | 快照初篩:同組相對排名,依門檻篩出候選基金 |
+| GET | `/api/meta/categories` | 各基金類別與檔數 |
 | GET | `/api/meta/runs` | 近 20 次抓取紀錄 |
+
+### 共通慣例
+
+- 每個成功回應都帶固定的 `disclaimer` 字串。
+- 錯誤形狀:400 為上面「驗證」一節的形狀;handler 自己回的錯誤(404、502)為 `{ error: string }`;`/admin/ingest` 失敗為 `500 { status: "error", message }`。
+- `/api/*` 開放 CORS。
+
+### `/api/funds/:id/recovery` 的行為
+
+- 序列來源:鉅亨含息序列(`PerformanceHIS`),快取於 `fund_series`。新鮮就用快取;過期只補抓 `[series_end, 今天]` 增量串接,接不上則整條重抓;`refresh=true` 強制整條重抓。
+- 回傳:最大回撤 `mdd`、歷次回撤 `episodes`(深度 ≥ `minDepth`,最深在前)、預設事件 `events`(2020 疫情 / 2022 升息 / 2025 關稅,窗口未覆蓋 → `not_covered`)、單筆進場風險 `lump_sum`(仍虧損進場日比例、最長回本天數含未回本開放區間、持有 1Y/3Y 的虧損機率/最差/中位)、近期含息報酬 `recent`(3M/6M/1Y)。
+- 比例與報酬皆為**小數**。
+- 窗口內有效點少於 60 → 指標回 null 並標 `reason: "series_too_short"`;未知基金 404;上游失敗且無快取 502。
+
+### `/api/screen` 的行為
+
+- **範圍篩選**(`category` `area` `group` `domicile` `currency`,逗號分隔可多選;同參數 OR、跨參數 AND;`maxRr`)只決定**回傳哪些基金**;`category` / `area` / `group` 至少擇一。
+- **百分位永遠以完整 (category, currency) 組計算**,不受其他篩選影響。每組回 `peer_count`(完整組)與 `matched_count`(篩選後)。
+- 依組算 3Y 夏普與最差年度跌幅的組內百分位、年度勝率,三道門檻(`minSharpePct` `minDropPct` `minWins`)都過的列進 `passed`,其餘計入 `rejected_count`;資料不足的列進 `insufficient` 並附原因。
+- 每檔附 `ladder`(3M/6M/1Y 報酬組內百分位)、`weak_flag`(三態:長期好但近期轉弱才為 true,任一窗口無資料為 null;只標記不剔除),以及 `recovery`(用 `/recovery` 分析過的基金帶出全期間摘要,未分析為 null)。
+
+### 新增或修改端點
+
+1. 在 `src/schemas/<資源>.ts` 寫請求/回應 schema;參數說明與範例用 `.meta()` 加上。有 transform 的欄位,`.meta()` 要掛在 transform **前面**,否則 `examples` / `default` 會在文件中遺失。
+2. 在 `src/schemas/endpoints.ts` 登錄一筆(摘要、標籤、params/query、各狀態碼的回應 schema)。
+3. 在 `routes/` 加路由檔,從登錄表取 schema 傳給 `withValidator()` 與 `responds()`。
+4. `test/openapi.test.ts` 會檢查文件列的端點與 `routes/` 的路由檔一一對應,漏登或多登都會失敗。
 
 ## 口徑提醒（務必在 UI 揭露）
 
