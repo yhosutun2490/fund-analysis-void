@@ -33,10 +33,20 @@ export const fakeChallengeRepository = {
     return active[0] ? { ...active[0] } : null;
   },
 
-  async markChallengeUsed(_db, { id, now }) {
+  async findLatestUse(_db, { purpose }) {
+    await tick();
+    const used = [...rows.values()]
+      .filter((r): r is Challenge & { usedAt: string } => r.purpose === purpose && !!r.usedAt)
+      .sort((a, b) => b.usedAt.localeCompare(a.usedAt));
+    return used[0] ? { id: used[0].id, usedAt: used[0].usedAt } : null;
+  },
+
+  async markChallengeUsed(_db, { id, now, cooldownSince }) {
     await tick();
     const row = rows.get(id);
     if (!row || row.usedAt || row.revokedAt) return false;
+    // 觸發冷卻併在同一個條件裡:同 purpose 在 cooldownSince 之後已有驗證碼被使用 → 不更新
+    if ([...rows.values()].some((r) => r.purpose === row.purpose && r.usedAt && r.usedAt > cooldownSince)) return false;
     row.usedAt = now;
     return true;
   },

@@ -1,5 +1,5 @@
 // POST /admin/ingest:帶 email 驗證碼手動觸發抓取（與 cron 同一流程）。
-// 驗證碼由 POST /admin/ingest/challenge 寄出;檢查順序:guard（middleware）→ body 驗證 → 驗證碼（challenge service）。
+// 驗證碼由 POST /admin/ingest/challenge 寄出;檢查順序:guard（middleware）→ body 驗證 → 觸發冷卻 → 驗證碼（challenge service）。
 import { defineHandler } from "void";
 import { endpoints } from "../../src/schemas/endpoints";
 import { consume } from "../../src/services/challenge";
@@ -16,6 +16,11 @@ export const POST = responds(
     if (!session) return c.json({ error: "unauthorized" }, 401);
 
     const challenge = await consume(c.env, session, "ingest", body.code);
+    if (challenge.status === "cooldown") {
+      return c.json({ error: "cooldown", retryAfter: challenge.retryAfter }, 429, {
+        "Retry-After": String(challenge.retryAfter),
+      });
+    }
     if (challenge.status !== "ok") return c.json({ error: "challenge_invalid" }, 422);
 
     try {
