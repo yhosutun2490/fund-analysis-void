@@ -2,22 +2,17 @@
 import { defineHandler } from "void";
 import { endpoints } from "../../../src/schemas/endpoints";
 import { issue } from "../../../src/services/challenge";
+import { guardedSession, tooManyRequests } from "../../../src/lib/admin";
 import { responds } from "../../../src/lib/validation";
 
 export const POST = responds(
   endpoints["POST /admin/ingest/challenge"].responses,
   defineHandler(async (c) => {
-    // admin guard 已擋下未登入;這裡只是讓型別收斂
-    const user = c.get("user");
-    const session = c.get("session");
-    if (!user || !session) return c.json({ error: "unauthorized" }, 401);
+    const { user, session } = guardedSession(c);
 
     const sent = await issue(c.env, user, session, "ingest");
-    if (sent.status === "cooldown") {
-      return c.json({ error: "cooldown", retryAfter: sent.retryAfter }, 429, { "Retry-After": String(sent.retryAfter) });
-    }
-    if (sent.status === "resend_too_soon") {
-      return c.json({ error: sent.status, retryAfter: sent.retryAfter }, 429, { "Retry-After": String(sent.retryAfter) });
+    if (sent.status === "cooldown" || sent.status === "resend_too_soon") {
+      return tooManyRequests(c, sent.status, sent.retryAfter);
     }
     if (sent.status === "send_failed") {
       console.error("challenge email send failed", sent.reason);

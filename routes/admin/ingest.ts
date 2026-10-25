@@ -4,6 +4,7 @@ import { defineHandler } from "void";
 import { endpoints } from "../../src/schemas/endpoints";
 import { consume } from "../../src/services/challenge";
 import { runIngest } from "../../src/services/ingest";
+import { guardedSession, tooManyRequests } from "../../src/lib/admin";
 import { responds } from "../../src/lib/validation";
 
 const endpoint = endpoints["POST /admin/ingest"];
@@ -11,16 +12,10 @@ const endpoint = endpoints["POST /admin/ingest"];
 export const POST = responds(
   endpoint.responses,
   defineHandler.withValidator({ body: endpoint.body })(async (c, { body }) => {
-    // admin guard 已擋下未登入;這裡只是讓型別收斂
-    const session = c.get("session");
-    if (!session) return c.json({ error: "unauthorized" }, 401);
+    const { session } = guardedSession(c);
 
     const challenge = await consume(c.env, session, "ingest", body.code);
-    if (challenge.status === "cooldown") {
-      return c.json({ error: "cooldown", retryAfter: challenge.retryAfter }, 429, {
-        "Retry-After": String(challenge.retryAfter),
-      });
-    }
+    if (challenge.status === "cooldown") return tooManyRequests(c, challenge.status, challenge.retryAfter);
     if (challenge.status === "mismatch") {
       return c.json({ error: "code_mismatch", attemptsLeft: challenge.attemptsLeft }, 422);
     }
