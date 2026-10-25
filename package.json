@@ -9,7 +9,7 @@
     "db:generate": "void db generate",
     "db:migrate": "void db migrate",
     "db:migrate:remote": "void db migrate --remote",
-    "ingest:local": "curl -s -X POST http://localhost:5173/admin/ingest | tail -1",
+    "ingest:local": "node scripts/ingest-local.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

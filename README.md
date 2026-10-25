@@ -78,7 +78,7 @@ npm run db:migrate:remote  # 線上
 
 # 3. 本地開發
 npm run dev                # http://localhost:5173/ 即 Swagger UI
-npm run ingest:local       # 手動抓一次(POST /admin/ingest)
+npm run ingest:local       # 手動抓一次(先登入再 POST /admin/ingest;帳密環境變數見 scripts/ingest-local.mjs)
 
 # 4. 部署(cron 會自動每日執行)
 npm run deploy
