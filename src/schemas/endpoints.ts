@@ -20,7 +20,10 @@ import { ErrorResponse, InvalidJsonBodyResponse, ValidationErrorResponse } from 
 export const endpoints = {
   "POST /admin/ingest/challenge": {
     summary: "要求手動觸發抓取的驗證碼（寄到登入管理員的 email）",
-    description: "驗證碼 6 位數字、有效 10 分鐘、只能用一次,綁定發出它的 session。重新要求時舊碼作廢。同一管理員 60 秒內只能要求一次（429 resend_too_soon）。",
+    description:
+      "驗證碼 6 位數字、只能用一次,綁定發出它的 session;有效時間預設 10 分鐘（CHALLENGE_TTL_SECONDS）。重新要求時舊碼作廢。" +
+      "重寄間隔以使用者計（同一管理員的所有 session 共用）:預設 60 秒（CHALLENGE_RESEND_SECONDS）內只能要求一次（429 resend_too_soon）。" +
+      "手動觸發開始後的觸發冷卻（預設 10 分鐘,CHALLENGE_COOLDOWN_SECONDS）內不寄信（429 cooldown）。",
     tag: "admin",
     auth: "session",
     // 401/403 由 admin guard middleware 回應（不經 responds()）,列進契約是為了文件。
@@ -34,7 +37,12 @@ export const endpoints = {
   },
   "POST /admin/ingest": {
     summary: "帶驗證碼手動觸發抓取（與 cron 同一流程）",
-    description: "先以 POST /admin/ingest/challenge 要求驗證碼。驗證碼正確才執行抓取;驗證碼用過即失效。錯 5 次即作廢,須重新要求;body 格式錯（400）不消耗嘗試次數。",
+    description:
+      "先以 POST /admin/ingest/challenge 要求驗證碼。驗證碼正確才執行抓取;驗證碼用過即失效。" +
+      "錯誤嘗試上限預設 5 次（CHALLENGE_MAX_ATTEMPTS）:第 5 次錯碼回 422 code_mismatch 且 attemptsLeft: 0,驗證碼同時作廢,之後再送回 422 challenge_invalid,須重新要求。" +
+      "重新要求後送舊碼回 challenge_invalid,不消耗新碼的嘗試次數;body 格式錯（400）也不消耗。" +
+      "重新要求驗證碼的重寄間隔以使用者計（預設 60 秒,CHALLENGE_RESEND_SECONDS）,不分 session。" +
+      "手動觸發開始後預設 10 分鐘（CHALLENGE_COOLDOWN_SECONDS）內為觸發冷卻（429 cooldown,全域）。",
     tag: "admin",
     auth: "session",
     body: AdminIngestBody,
