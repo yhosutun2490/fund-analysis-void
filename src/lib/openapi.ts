@@ -11,6 +11,8 @@ export interface Endpoint {
   tag: string;
   params?: z.ZodObject;
   query?: z.ZodObject;
+  /** JSON request body;有給才輸出 requestBody（必填）。 */
+  body?: z.ZodObject;
   responses: Partial<Record<number, z.ZodType>>;
 }
 
@@ -32,6 +34,12 @@ function parameters(slot: "path" | "query", schema: z.ZodObject | undefined) {
   }));
 }
 
+/** body schema → OpenAPI requestBody。與 parameters 一樣以 input 形狀轉換（使用者實際送的 JSON）。 */
+function requestBody(schema: z.ZodObject) {
+  const { $schema, ...json } = z.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
+  return { required: true, content: { "application/json": { schema: json } } };
+}
+
 /** zod schema → OpenAPI 的 JSON 回應（JSON Schema 2020-12,即 OpenAPI 3.1 的方言;去掉 $schema）。 */
 function jsonResponse(status: string, schema: z.ZodType) {
   const { $schema, ...json } = z.toJSONSchema(schema);
@@ -50,6 +58,7 @@ export function toOpenAPI(endpoints: Record<string, Endpoint>) {
       description: ep.description,
       tags: [ep.tag],
       parameters: [...parameters("path", ep.params), ...parameters("query", ep.query)],
+      ...(ep.body && { requestBody: requestBody(ep.body) }),
       responses: Object.fromEntries(Object.entries(ep.responses).map(([status, schema]) => [status, jsonResponse(status, schema!)])),
     };
   }
