@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { type Context, Hono, type MiddlewareHandler } from "hono";
+import type { AuthSession, AuthState, AuthUser } from "void/auth";
 import { convertReturnValue } from "void/response";
 import type { Env } from "../src/bindings";
 
@@ -14,13 +15,17 @@ import type { Env } from "../src/bindings";
  *
  * 已知限制:比對順序由這裡自己實作,不是 Void 實際的 router。只要沒有 catch-all 跟動態段競爭就不會有差異,
  * 所以不支援 catch-all(`[...x]`)路由檔:遇到就直接報錯,要用時再照 Void 的 compareRouteSpecificity 補上。
+ *
+ * 也沒有掛 Void 的 auth middleware 與 /api/auth/*:改由 stub middleware(排在所有使用者 middleware 之前,
+ * 與 Void 產生的入口同序)把該次請求指定的 user/session 放進 context,見 `request()` 的 `auth` 參數。
  */
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] as const;
 type Method = (typeof METHODS)[number];
-type RouteHandler = (c: Context<{ Bindings: Env }>) => unknown;
+type TestEnv = { Bindings: Env; Variables: { user: AuthUser | null; session: AuthSession | null } };
+type RouteHandler = (c: Context<TestEnv>) => unknown;
 export type RouteModule = Partial<Record<Method, RouteHandler>>;
-export type MiddlewareModule = { default: MiddlewareHandler<{ Bindings: Env }> };
+export type MiddlewareModule = { default: MiddlewareHandler<TestEnv> };
 
 interface Route {
   pattern: string;
@@ -72,12 +77,24 @@ const routeTable = (routes: Record<string, RouteModule>) =>
 export const routeEndpoints = (routes: Record<string, RouteModule>) =>
   routeTable(routes).flatMap(({ pattern, module }) => METHODS.filter((m) => module[m]).map((m) => `${m} ${pattern}`));
 
+/** 每個請求指定的登入狀態;沒登記的請求視為未登入。以 Request 為 key,不跨請求殘留。 */
+const authByRequest = new WeakMap<Request, AuthState>();
+
+/** 模擬 Void auth middleware 的產出:未登入時 user/session 皆為 null。 */
+const authStub: MiddlewareHandler<TestEnv> = async (c, next) => {
+  const state = authByRequest.get(c.req.raw);
+  c.set("user", state?.user ?? null);
+  c.set("session", state?.session ?? null);
+  await next();
+};
+
 /** 依 Void 檔名規則把路由表與全域 middleware(皆為 glob 結果)掛成一個 Hono app。 */
 export function createEntry(
   routes: Record<string, RouteModule>,
   middleware: Record<string, MiddlewareModule> = {},
 ) {
-  const app = new Hono<{ Bindings: Env }>();
+  const app = new Hono<TestEnv>();
+  app.use(authStub);
   Object.entries(middleware)
     .filter(([key]) => !key.replace(/^.*?\/middleware\//, "").startsWith("_"))
     .sort(([a], [b]) => middlewareOrder(a) - middlewareOrder(b))
@@ -103,6 +120,24 @@ const executionCtx = {
   props: {},
 } as unknown as ExecutionContext;
 
-/** 對整個 app(路由檔 + 全域 middleware)送出請求。 */
-export const request = (path: string, init?: RequestInit, env?: Partial<Env>) =>
-  entry.request(path, init, env, executionCtx);
+/** 測試用的登入狀態:以該 email 登入的使用者與其 session(欄位值無意義,只有 email 會被讀)。 */
+export function signedInAs(email: string): AuthState {
+  const now = new Date("2026-01-01T00:00:00Z");
+  return {
+    user: { id: "test-user", email, emailVerified: false, name: "test", createdAt: now, updatedAt: now },
+    session: {
+      id: "test-session", token: "test-token", userId: "test-user",
+      expiresAt: new Date("2099-01-01T00:00:00Z"), createdAt: now, updatedAt: now,
+    },
+  };
+}
+
+/**
+ * 對整個 app(路由檔 + 全域 middleware)送出請求。
+ * `auth`:本次請求的登入狀態(通常用 `signedInAs(email)`);省略即未登入。
+ */
+export const request = (path: string, init?: RequestInit, env?: Partial<Env>, auth?: AuthState) => {
+  const req = new Request(new URL(path, "http://localhost"), init);
+  if (auth) authByRequest.set(req, auth);
+  return entry.request(req, undefined, env, executionCtx);
+};
