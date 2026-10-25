@@ -1,6 +1,6 @@
-// GET /api/screen 的請求與回應契約（純計算,見 src/screen.ts）。
+// GET /api/screen 的請求與回應契約（純計算,見 src/domain/screen.ts）。
 import { z } from "zod";
-import type { Window } from "../screen";
+import type { Window } from "../domain/screen";
 import { disclaimer } from "./shared";
 
 // ── 請求 ───────────────────────────────────────────────────────

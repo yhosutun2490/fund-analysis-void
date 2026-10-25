@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { median, percentRank, type ScreenRow, screenGroup } from "../src/screen";
+import { median, percentRank, type ScreenRow, screenGroup } from "../src/domain/screen";
 
 // 建一列 ScreenRow,未給的欄位為 null
 function row(partial: Partial<ScreenRow>): ScreenRow {

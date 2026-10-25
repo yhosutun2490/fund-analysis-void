@@ -1,6 +1,6 @@
 import type { BatchItem } from "drizzle-orm/batch";
 import { desc, eq } from "drizzle-orm";
-import type { FundRecord } from "../anue";
+import type { FundRecord } from "../anue/search";
 import { makeDb } from "../db/client";
 import { fundRisk, funds, ingestRuns } from "../db/schema";
 import { runCols } from "../db/selections";

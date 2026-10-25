@@ -2,7 +2,7 @@
 import { defineHandler } from "void";
 import { AdminIngestError, AdminIngestOk } from "../../src/schemas/admin";
 import { runIngest } from "../../src/services/ingest";
-import { responds } from "../../src/validation";
+import { responds } from "../../src/lib/validation";
 
 export const POST = responds(
   { 200: AdminIngestOk, 500: AdminIngestError },

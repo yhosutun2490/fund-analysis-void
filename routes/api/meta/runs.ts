@@ -2,7 +2,7 @@
 import { defineHandler } from "void";
 import { listRuns } from "../../../src/repositories/ingest";
 import { RunsResponse } from "../../../src/schemas/meta";
-import { responds } from "../../../src/validation";
+import { responds } from "../../../src/lib/validation";
 
 export const GET = responds(
   { 200: RunsResponse },

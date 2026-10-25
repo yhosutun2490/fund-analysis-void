@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildAreaMap, fetchInvestmentAreaMap, parseAreaList, parseFundIDs } from "../src/anue";
+import { buildAreaMap, fetchInvestmentAreaMap, parseAreaList, parseFundIDs } from "../src/anue/search";
 
 describe("parseFundIDs", () => {
   it("逗號分隔、去空白、濾空", () => {

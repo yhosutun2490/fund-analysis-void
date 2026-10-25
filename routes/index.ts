@@ -2,7 +2,7 @@
 import { defineHandler } from "void";
 import { DISCLAIMER } from "../src/disclaimer";
 import { RootResponse } from "../src/schemas/root";
-import { responds } from "../src/validation";
+import { responds } from "../src/lib/validation";
 
 export const GET = responds(
   { 200: RootResponse },

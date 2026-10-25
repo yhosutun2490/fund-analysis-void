@@ -4,8 +4,8 @@ import { DISCLAIMER } from "../../../src/disclaimer";
 import { listFullGroups, listMatchedKeys, type ScreenFilters } from "../../../src/repositories/funds";
 import { ScreenQuery, ScreenResponse } from "../../../src/schemas/screen";
 import { ValidationErrorResponse } from "../../../src/schemas/shared";
-import { screenGroups } from "../../../src/screen";
-import { responds } from "../../../src/validation";
+import { screenGroups } from "../../../src/domain/screen";
+import { responds } from "../../../src/lib/validation";
 
 export const GET = responds(
   { 200: ScreenResponse, 400: ValidationErrorResponse },

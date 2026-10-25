@@ -1,5 +1,5 @@
 import type { Env } from "../bindings";
-import { ingestFailureMessage, ingestWarningMessage, notifyDiscord } from "../notify";
+import { ingestFailureMessage, ingestWarningMessage, notifyDiscord } from "../lib/notify";
 import { runIngest } from "../services/ingest";
 
 /** Cron Trigger：與手動 /admin/ingest 共用 runIngest 流程;失敗或帶 warning 時通知 Discord */

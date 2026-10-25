@@ -7,7 +7,7 @@ import {
   recentReturns,
   type SeriesPoint,
   sliceWindow,
-} from "../src/recovery";
+} from "../src/domain/recovery";
 
 describe("computeMdd — 已回復", () => {
   const points: SeriesPoint[] = [

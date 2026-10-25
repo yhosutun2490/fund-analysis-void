@@ -2,7 +2,7 @@
 import { defineHandler } from "void";
 import { listCategories } from "../../../src/repositories/funds";
 import { CategoriesResponse } from "../../../src/schemas/meta";
-import { responds } from "../../../src/validation";
+import { responds } from "../../../src/lib/validation";
 
 export const GET = responds(
   { 200: CategoriesResponse },

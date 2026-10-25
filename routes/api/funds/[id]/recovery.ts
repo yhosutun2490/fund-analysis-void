@@ -1,13 +1,13 @@
 // GET /api/funds/:id/recovery:單檔回復分析（含息序列的最大回撤、回撤事件、單筆投入與近期報酬）。
 import { defineHandler } from "void";
-import { AnueSchemaError } from "../../../../src/anueSchema";
+import { AnueSchemaError } from "../../../../src/anue/schema";
 import { DISCLAIMER } from "../../../../src/disclaimer";
-import { computeEpisodes, computeEvents, computeLumpSum, computeMdd, recentReturns, sliceWindow } from "../../../../src/recovery";
+import { computeEpisodes, computeEvents, computeLumpSum, computeMdd, recentReturns, sliceWindow } from "../../../../src/domain/recovery";
 import { getFund } from "../../../../src/repositories/funds";
 import { FundIdParam, RecoveryQuery, RecoveryResponse } from "../../../../src/schemas/funds";
 import { ErrorResponse, ValidationErrorResponse } from "../../../../src/schemas/shared";
 import { loadSeries, UpstreamUnavailable } from "../../../../src/services/recovery";
-import { responds } from "../../../../src/validation";
+import { responds } from "../../../../src/lib/validation";
 
 /** 窗口內有效點少於此數 → 指標回 null 並標 series_too_short。 */
 const MIN_POINTS = 60;

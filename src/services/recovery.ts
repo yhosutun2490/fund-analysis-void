@@ -1,7 +1,7 @@
-import { fetchTotalReturnSeries } from "../anuePrice";
-import { AnueSchemaError } from "../anueSchema";
+import { fetchTotalReturnSeries } from "../anue/price";
+import { AnueSchemaError } from "../anue/schema";
 import type { Env } from "../bindings";
-import { computeLumpSum, computeMdd, type SeriesPoint } from "../recovery";
+import { computeLumpSum, computeMdd, type SeriesPoint } from "../domain/recovery";
 import { getLatestRisk } from "../repositories/funds";
 import { getSeries, type SeriesRow, type SeriesSummary, saveSeries } from "../repositories/series";
 

@@ -1,4 +1,4 @@
-import { fetchAllFunds, fetchInvestmentAreaMap, normalize } from "../anue";
+import { fetchAllFunds, fetchInvestmentAreaMap, normalize } from "../anue/search";
 import type { Env } from "../bindings";
 import { recordRun, updateInvestmentAreas, upsertRecords } from "../repositories/ingest";
 
