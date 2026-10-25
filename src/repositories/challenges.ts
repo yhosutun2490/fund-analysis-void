@@ -3,13 +3,16 @@ import { and, desc, eq, gt, isNotNull, isNull, lt, notExists, sql } from "drizzl
 import { alias } from "drizzle-orm/sqlite-core";
 import { makeDb } from "../db/client";
 import { adminChallenges } from "../../db/schema";
+import type { ChallengePurpose } from "../services/challenge";
 
 export type Challenge = typeof adminChallenges.$inferSelect;
 /** 新發的驗證碼:作廢/使用時間與嘗試次數由 DB 預設（空、空、0）。 */
-export type NewChallenge = Pick<Challenge, "id" | "purpose" | "userId" | "sessionId" | "codeHash" | "createdAt" | "expiresAt">;
+export type NewChallenge = Pick<Challenge, "id" | "userId" | "sessionId" | "codeHash" | "createdAt" | "expiresAt"> & {
+  purpose: ChallengePurpose;
+};
 
 /** 同 session、同 purpose 仍未使用、未作廢的列。 */
-const openFor = (sessionId: string, purpose: string) =>
+const openFor = (sessionId: string, purpose: ChallengePurpose) =>
   and(
     eq(adminChallenges.sessionId, sessionId),
     eq(adminChallenges.purpose, purpose),
@@ -35,7 +38,7 @@ export async function replaceActiveChallenge(db: D1Database, challenge: NewChall
  */
 export async function findActiveChallenge(
   db: D1Database,
-  { sessionId, purpose, now, maxAttempts }: { sessionId: string; purpose: string; now: string; maxAttempts: number },
+  { sessionId, purpose, now, maxAttempts }: { sessionId: string; purpose: ChallengePurpose; now: string; maxAttempts: number },
 ): Promise<Challenge | null> {
   const [row] = await makeDb(db)
     .select()
@@ -52,7 +55,7 @@ export async function findActiveChallenge(
  */
 export async function findLatestRevokedChallenge(
   db: D1Database,
-  { sessionId, purpose }: { sessionId: string; purpose: string },
+  { sessionId, purpose }: { sessionId: string; purpose: ChallengePurpose },
 ): Promise<Challenge | null> {
   const [row] = await makeDb(db)
     .select()
@@ -73,7 +76,7 @@ export async function findLatestRevokedChallenge(
 /** 觸發冷卻的依據:該 purpose 最近一次被使用的驗證碼（不分使用者與 session）;從未使用過則 null。 */
 export async function findLatestUse(
   db: D1Database,
-  { purpose }: { purpose: string },
+  { purpose }: { purpose: ChallengePurpose },
 ): Promise<{ id: string; usedAt: string } | null> {
   const [row] = await makeDb(db)
     .select({ id: adminChallenges.id, usedAt: adminChallenges.usedAt })
@@ -123,7 +126,7 @@ export async function markChallengeUsed(
  */
 export async function latestChallengeCreatedAt(
   db: D1Database,
-  { userId, purpose }: { userId: string; purpose: string },
+  { userId, purpose }: { userId: string; purpose: ChallengePurpose },
 ): Promise<string | null> {
   const [row] = await makeDb(db)
     .select({ createdAt: adminChallenges.createdAt })
