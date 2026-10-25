@@ -1,5 +1,5 @@
 // admin_challenges（觸發驗證的驗證碼）的 DB 存取。規則（有效期、比對、次數）在 src/services/challenge.ts。
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { makeDb } from "../db/client";
 import { adminChallenges } from "../../db/schema";
 
@@ -53,4 +53,24 @@ export async function markChallengeUsed(db: D1Database, { id, now }: { id: strin
     .where(and(eq(adminChallenges.id, id), isNull(adminChallenges.usedAt), isNull(adminChallenges.revokedAt)))
     .run();
   return result.meta.changes === 1;
+}
+
+/**
+ * 記一次錯誤嘗試:attempts + 1,達 maxAttempts 即同時作廢（作廢時間 = now）。
+ * 同一個 UPDATE 以 DB 端的原值計算,並發的錯誤嘗試不會互相覆蓋,也不會多給機會。
+ * 只對仍未使用、未作廢的列生效;回傳累加後的次數,該列已被使用/作廢則 null。
+ */
+export async function recordFailedAttempt(
+  db: D1Database,
+  { id, maxAttempts, now }: { id: string; maxAttempts: number; now: string },
+): Promise<number | null> {
+  const [row] = await makeDb(db)
+    .update(adminChallenges)
+    .set({
+      attempts: sql`${adminChallenges.attempts} + 1`,
+      revokedAt: sql`CASE WHEN ${adminChallenges.attempts} + 1 >= ${maxAttempts} THEN ${now} ELSE NULL END`,
+    })
+    .where(and(eq(adminChallenges.id, id), isNull(adminChallenges.usedAt), isNull(adminChallenges.revokedAt)))
+    .returning({ attempts: adminChallenges.attempts });
+  return row?.attempts ?? null;
 }

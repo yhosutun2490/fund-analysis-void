@@ -3,7 +3,7 @@
 import { sendEmail } from "void/email";
 import type { Env } from "../bindings";
 import { EMAIL_FROM } from "../lib/email";
-import { findActiveChallenge, markChallengeUsed, replaceActiveChallenge } from "../repositories/challenges";
+import { findActiveChallenge, markChallengeUsed, recordFailedAttempt, replaceActiveChallenge } from "../repositories/challenges";
 
 /** 驗證碼保護的管理員動作。目前只有 ingest;資料表的 purpose 欄保留擴充。 */
 export type ChallengePurpose = "ingest";
@@ -18,14 +18,23 @@ export interface ChallengeSession {
 }
 
 export type IssueResult = { status: "sent"; expiresAt: Date; resendAfter: Date };
-export type ConsumeResult = { status: "ok" } | { status: "invalid" };
+export type ConsumeResult =
+  | { status: "ok" }
+  | { status: "invalid" }
+  /** 碼不符;attemptsLeft 為 0 表示這次錯滿、驗證碼已作廢。 */
+  | { status: "mismatch"; attemptsLeft: number };
 
 const SUBJECT_ACTION: Record<ChallengePurpose, string> = { ingest: "手動觸發抓取" };
 
+/** 正整數 env var;未設定或不合法即用預設值。 */
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const n = Number(raw);
+  return raw && Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
 /** 正整數 env var（秒）→ 毫秒;未設定或不合法即用預設值。 */
 function seconds(raw: string | undefined, fallback: number): number {
-  const n = Number(raw);
-  return (raw && Number.isInteger(n) && n > 0 ? n : fallback) * 1000;
+  return positiveInt(raw, fallback) * 1000;
 }
 
 /** 參數預設值,可用 env var 覆寫。 */
@@ -35,6 +44,8 @@ function settings(env: Env) {
     ttlMs: seconds(env.CHALLENGE_TTL_SECONDS, 600),
     /** 重寄間隔（回應的 resendAfter） */
     resendMs: seconds(env.CHALLENGE_RESEND_SECONDS, 60),
+    /** 最多錯誤嘗試次數,錯滿即作廢 */
+    maxAttempts: positiveInt(env.CHALLENGE_MAX_ATTEMPTS, 5),
   };
 }
 
@@ -124,7 +135,13 @@ export async function consume(
   const challenge = await findActiveChallenge(env.DB, { sessionId: session.id, purpose, now });
   if (!challenge) return { status: "invalid" };
 
-  if ((await hashCode(challenge.id, code)) !== challenge.codeHash) return { status: "invalid" };
+  if ((await hashCode(challenge.id, code)) !== challenge.codeHash) {
+    const { maxAttempts } = settings(env);
+    const attempts = await recordFailedAttempt(env.DB, { id: challenge.id, maxAttempts, now });
+    // 比對期間被並發請求用掉或作廢
+    if (attempts === null) return { status: "invalid" };
+    return { status: "mismatch", attemptsLeft: Math.max(0, maxAttempts - attempts) };
+  }
 
   const marked = await markChallengeUsed(env.DB, { id: challenge.id, now });
   return marked ? { status: "ok" } : { status: "invalid" };

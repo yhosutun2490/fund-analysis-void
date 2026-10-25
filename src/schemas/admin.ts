@@ -19,6 +19,12 @@ export const ChallengeSent = z.strictObject({
 /** 沒有有效的驗證碼:過期、已使用、已作廢、從未要求,或不是這個 session 要求的。 */
 export const ChallengeInvalid = z.strictObject({ error: z.literal("challenge_invalid") });
 
+/** 驗證碼不符:attemptsLeft 為剩餘可嘗試次數;0 表示這次錯滿、驗證碼已作廢,須重新要求。 */
+export const CodeMismatch = z.strictObject({
+  error: z.literal("code_mismatch"),
+  attemptsLeft: z.number().int().nonnegative(),
+});
+
 export const AdminIngestOk = z.strictObject({
   status: z.literal("ok"),
   dataTime: z.string(),

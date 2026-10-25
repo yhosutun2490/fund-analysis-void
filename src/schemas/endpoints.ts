@@ -2,7 +2,7 @@
 // GET /openapi.json 從這裡產生文件,兩者同源。文件端點本身（GET /、GET /openapi.json）不登錄。
 import { z } from "zod";
 import type { Endpoint } from "../lib/openapi";
-import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeInvalid, ChallengeSent } from "./admin";
+import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeInvalid, ChallengeSent, CodeMismatch } from "./admin";
 import {
   FundDetailResponse,
   FundHistoryResponse,
@@ -27,7 +27,7 @@ export const endpoints = {
   },
   "POST /admin/ingest": {
     summary: "帶驗證碼手動觸發抓取（與 cron 同一流程）",
-    description: "先以 POST /admin/ingest/challenge 要求驗證碼。驗證碼正確才執行抓取;驗證碼用過即失效。",
+    description: "先以 POST /admin/ingest/challenge 要求驗證碼。驗證碼正確才執行抓取;驗證碼用過即失效。錯 5 次即作廢,須重新要求;body 格式錯（400）不消耗嘗試次數。",
     tag: "admin",
     auth: "session",
     body: AdminIngestBody,
@@ -36,7 +36,7 @@ export const endpoints = {
       400: z.union([ValidationErrorResponse, InvalidJsonBodyResponse]),
       401: ErrorResponse,
       403: ErrorResponse,
-      422: ChallengeInvalid,
+      422: z.union([CodeMismatch, ChallengeInvalid]),
       500: AdminIngestError,
     },
   },

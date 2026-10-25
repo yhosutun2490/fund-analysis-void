@@ -122,7 +122,7 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     expect(await res.json()).toMatchObject({ expiresAt: "2026-10-25T00:02:00.000Z" });
   });
 
-  it("重新要求後舊碼 → challenge_invalid,新碼可用", async () => {
+  it("重新要求後舊碼被拒(對目前有效的新碼而言就是錯碼 → code_mismatch),新碼可用", async () => {
     await requestChallenge();
     const oldCode = latestCode();
     vi.setSystemTime(new Date("2026-10-25T00:02:00Z"));
@@ -133,7 +133,7 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
 
     const old = await trigger({ code: oldCode });
     expect(old.status).toBe(422);
-    expect(await old.json()).toEqual({ error: "challenge_invalid" });
+    expect(await old.json()).toEqual({ error: "code_mismatch", attemptsLeft: 4 });
 
     expect((await trigger({ code: newCode })).status).toBe(200);
     expect(runIngest).toHaveBeenCalledOnce();
@@ -197,11 +197,49 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     expect(runIngest).toHaveBeenCalledOnce();
   });
 
-  it("碼不符 → 422,不執行抓取", async () => {
+  it("碼不符 → 422 code_mismatch,attemptsLeft 逐次遞減,不執行抓取;還有機會時正確碼仍可用", async () => {
     await requestChallenge();
-    const res = await trigger({ code: wrongCode(latestCode()) });
-    expect(res.status).toBe(422);
+    const code = latestCode();
+
+    for (const attemptsLeft of [4, 3]) {
+      const res = await trigger({ code: wrongCode(code) });
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ error: "code_mismatch", attemptsLeft });
+    }
     expect(runIngest).not.toHaveBeenCalled();
+
+    expect((await trigger({ code })).status).toBe(200);
+  });
+
+  it("錯滿 5 次即作廢(第 5 次 attemptsLeft 0),之後正確碼也 → challenge_invalid", async () => {
+    await requestChallenge();
+    const code = latestCode();
+
+    for (const attemptsLeft of [4, 3, 2, 1, 0]) {
+      expect(await (await trigger({ code: wrongCode(code) })).json()).toEqual({ error: "code_mismatch", attemptsLeft });
+    }
+
+    const res = await trigger({ code });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "challenge_invalid" });
+    expect(runIngest).not.toHaveBeenCalled();
+  });
+
+  it("嘗試次數上限可用 CHALLENGE_MAX_ATTEMPTS 覆寫", async () => {
+    const strict = { ...env, CHALLENGE_MAX_ATTEMPTS: "2" };
+    await request("/admin/ingest/challenge", { method: "POST" }, strict, signedInAs(ADMIN));
+    const code = latestCode();
+    const send = (c: string) =>
+      request(
+        "/admin/ingest",
+        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: c }) },
+        strict,
+        signedInAs(ADMIN),
+      );
+
+    expect(await (await send(wrongCode(code))).json()).toEqual({ error: "code_mismatch", attemptsLeft: 1 });
+    expect(await (await send(wrongCode(code))).json()).toEqual({ error: "code_mismatch", attemptsLeft: 0 });
+    expect(await (await send(code)).json()).toEqual({ error: "challenge_invalid" });
   });
 
   it("抓取失敗 → 500 { status: error, message }", async () => {

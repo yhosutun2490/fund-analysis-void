@@ -16,6 +16,9 @@ export const POST = responds(
     if (!session) return c.json({ error: "unauthorized" }, 401);
 
     const challenge = await consume(c.env, session, "ingest", body.code);
+    if (challenge.status === "mismatch") {
+      return c.json({ error: "code_mismatch", attemptsLeft: challenge.attemptsLeft }, 422);
+    }
     if (challenge.status !== "ok") return c.json({ error: "challenge_invalid" }, 422);
 
     try {

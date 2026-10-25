@@ -113,7 +113,13 @@ describe("GET /openapi.json", () => {
     // 400:欄位驗證失敗,或 body 不是 JSON
     const bad = schemaOf(op.responses["400"]).anyOf.map((s: Record<string, any>) => s.properties.error.const);
     expect(bad).toEqual(["Validation failed", "Invalid JSON body"]);
-    expect(schemaOf(op.responses["422"]).properties.error.const).toBe("challenge_invalid");
+    // 422:碼不符(帶剩餘次數),或沒有有效的驗證碼
+    const [mismatch, invalid] = schemaOf(op.responses["422"]).anyOf;
+    expect(mismatch.properties.error.const).toBe("code_mismatch");
+    expect(mismatch.properties.attemptsLeft).toMatchObject({ type: "integer", minimum: 0 });
+    expect(mismatch.required).toEqual(["error", "attemptsLeft"]);
+    expect(mismatch.additionalProperties).toBe(false);
+    expect(invalid.properties.error.const).toBe("challenge_invalid");
   });
 
   it("components.securitySchemes 宣告 Better Auth session cookie 的 apiKey scheme", async () => {
