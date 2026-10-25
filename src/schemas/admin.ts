@@ -40,7 +40,7 @@ export const ChallengeCooldown = z
     error: z.literal("cooldown"),
     retryAfter: z.number().int().positive().meta({ description: "冷卻剩餘秒數（同 Retry-After 標頭）" }),
   })
-  .meta({ description: "觸發冷卻中:手動觸發開始後 10 分鐘內（全域,不分管理員與 session）不能再要求驗證碼或觸發" });
+  .meta({ description: "觸發冷卻中:手動觸發開始後預設 10 分鐘（CHALLENGE_COOLDOWN_SECONDS）內（全域,不分管理員與 session）不能再要求驗證碼或觸發" });
 
 export const AdminIngestOk = z.strictObject({
   status: z.literal("ok"),

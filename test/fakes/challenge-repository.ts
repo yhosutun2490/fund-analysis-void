@@ -25,12 +25,28 @@ export const fakeChallengeRepository = {
     rows.set(challenge.id, { revokedAt: null, usedAt: null, attempts: 0, ...challenge });
   },
 
-  async findActiveChallenge(_db, { sessionId, purpose, now }) {
+  async findActiveChallenge(_db, { sessionId, purpose, now, maxAttempts }) {
     await tick();
     const active = [...rows.values()]
-      .filter((r) => r.sessionId === sessionId && r.purpose === purpose && !r.revokedAt && !r.usedAt && r.expiresAt > now)
+      .filter(
+        (r) =>
+          r.sessionId === sessionId &&
+          r.purpose === purpose &&
+          !r.revokedAt &&
+          !r.usedAt &&
+          r.expiresAt > now &&
+          r.attempts < maxAttempts,
+      )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return active[0] ? { ...active[0] } : null;
+  },
+
+  async findLatestRevokedChallenge(_db, { sessionId, purpose }) {
+    await tick();
+    const revoked = [...rows.values()]
+      .filter((r) => r.sessionId === sessionId && r.purpose === purpose && r.revokedAt && !r.usedAt)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return revoked[0] ? { ...revoked[0] } : null;
   },
 
   async findLatestUse(_db, { purpose }) {

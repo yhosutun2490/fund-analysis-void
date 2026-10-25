@@ -199,7 +199,7 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     expect(await res.json()).toMatchObject({ expiresAt: "2026-10-25T00:02:00.000Z" });
   });
 
-  it("重新要求後舊碼被拒(對目前有效的新碼而言就是錯碼 → code_mismatch),新碼可用", async () => {
+  it("重新要求後舊碼 → challenge_invalid,不消耗新碼的嘗試次數;新碼可用", async () => {
     await requestChallenge();
     const oldCode = latestCode();
     vi.setSystemTime(new Date("2026-10-25T00:02:00Z"));
@@ -210,7 +210,12 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
 
     const old = await trigger({ code: oldCode });
     expect(old.status).toBe(422);
-    expect(await old.json()).toEqual({ error: "code_mismatch", attemptsLeft: 4 });
+    expect(await old.json()).toEqual({ error: "challenge_invalid" });
+
+    // 舊碼沒有算進新碼的錯誤次數:第一次錯碼仍剩 4 次
+    const candidates = [wrongCode(newCode), wrongCode(wrongCode(newCode))];
+    const wrong = candidates.find((c) => c !== oldCode)!;
+    expect(await (await trigger({ code: wrong })).json()).toEqual({ error: "code_mismatch", attemptsLeft: 4 });
 
     expect((await trigger({ code: newCode })).status).toBe(200);
     expect(runIngest).toHaveBeenCalledOnce();
@@ -319,6 +324,21 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     expect(await (await send(wrongCode(code))).json()).toEqual({ error: "code_mismatch", attemptsLeft: 1 });
     expect(await (await send(wrongCode(code))).json()).toEqual({ error: "code_mismatch", attemptsLeft: 0 });
     expect(await (await send(code)).json()).toEqual({ error: "challenge_invalid" });
+  });
+
+  it("調低 CHALLENGE_MAX_ATTEMPTS 後,錯誤次數已達新上限的碼立即失效 → challenge_invalid", async () => {
+    await requestChallenge();
+    const code = latestCode();
+    for (const attemptsLeft of [4, 3, 2]) {
+      expect(await (await trigger({ code: wrongCode(code) })).json()).toEqual({ error: "code_mismatch", attemptsLeft });
+    }
+
+    // 已錯 3 次;上限改成 3 → 這組碼不再有效,正確碼也不放行
+    const lowered = { ...env, CHALLENGE_MAX_ATTEMPTS: "3" };
+    const res = await trigger({ code }, signedInAs(ADMIN), lowered);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "challenge_invalid" });
+    expect(runIngest).not.toHaveBeenCalled();
   });
 
   it("抓取失敗 → 500 { status: error, message }", async () => {

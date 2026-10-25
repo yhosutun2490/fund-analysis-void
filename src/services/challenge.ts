@@ -3,9 +3,15 @@
 import { sendEmail } from "void/email";
 import type { Env } from "../bindings";
 import { EMAIL_FROM } from "../lib/email";
-import { findActiveChallenge, findLatestUse, markChallengeUsed, replaceActiveChallenge } from "../repositories/challenges";
-// 防濫用:重寄間隔、錯誤次數上限
-import { latestChallengeCreatedAt, recordFailedAttempt } from "../repositories/challenges";
+import {
+  findActiveChallenge,
+  findLatestRevokedChallenge,
+  findLatestUse,
+  latestChallengeCreatedAt,
+  markChallengeUsed,
+  recordFailedAttempt,
+  replaceActiveChallenge,
+} from "../repositories/challenges";
 
 /** 驗證碼保護的管理員動作。目前只有 ingest;資料表的 purpose 欄保留擴充。 */
 export type ChallengePurpose = "ingest";
@@ -43,20 +49,23 @@ function positiveInt(raw: string | undefined, fallback: number): number {
   return raw && Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
-/** 正整數 env var（秒）→ 毫秒;未設定或不合法即用預設值。 */
-function seconds(raw: string | undefined, fallback: number): number {
-  return positiveInt(raw, fallback) * 1000;
+/** 秒數 env var → 毫秒;未設定或不合法即用預設秒數。 */
+function secondsEnvToMs(raw: string | undefined, fallbackSeconds: number): number {
+  return positiveInt(raw, fallbackSeconds) * 1000;
 }
+
+/** 剩餘毫秒 → 回應用的秒數（無條件進位,同 Retry-After）。 */
+const ceilSeconds = (ms: number) => Math.ceil(ms / 1000);
 
 /** 參數預設值,可用 env var 覆寫。 */
 function settings(env: Env) {
   return {
     /** 驗證碼有效時間 */
-    ttlMs: seconds(env.CHALLENGE_TTL_SECONDS, 600),
+    ttlMs: secondsEnvToMs(env.CHALLENGE_TTL_SECONDS, 600),
     /** 重寄間隔（回應的 resendAfter） */
-    resendMs: seconds(env.CHALLENGE_RESEND_SECONDS, 60),
+    resendMs: secondsEnvToMs(env.CHALLENGE_RESEND_SECONDS, 60),
     /** 觸發冷卻:最近一次使用驗證碼後多久內不能再要求或觸發 */
-    cooldownMs: seconds(env.CHALLENGE_COOLDOWN_SECONDS, 600),
+    cooldownMs: secondsEnvToMs(env.CHALLENGE_COOLDOWN_SECONDS, 600),
     /** 最多錯誤嘗試次數,錯滿即作廢 */
     maxAttempts: positiveInt(env.CHALLENGE_MAX_ATTEMPTS, 5),
   };
@@ -70,7 +79,7 @@ async function cooldownRemaining(env: Env, purpose: ChallengePurpose, now: Date)
   const latest = await findLatestUse(env.DB, { purpose });
   if (!latest) return null;
   const remainingMs = new Date(latest.usedAt).getTime() + settings(env).cooldownMs - now.getTime();
-  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
+  return remainingMs > 0 ? ceilSeconds(remainingMs) : null;
 }
 
 /** 均勻分布的 6 位數字（含前導 0）:拒絕取樣,避免 2^32 mod 10^6 造成的偏差。 */
@@ -129,7 +138,7 @@ export async function issue(
   const lastCreatedAt = await latestChallengeCreatedAt(env.DB, { userId: user.id, purpose });
   if (lastCreatedAt) {
     const waitMs = Date.parse(lastCreatedAt) + resendMs - now.getTime();
-    if (waitMs > 0) return { status: "resend_too_soon", retryAfter: Math.ceil(waitMs / 1000) };
+    if (waitMs > 0) return { status: "resend_too_soon", retryAfter: ceilSeconds(waitMs) };
   }
 
   const id = crypto.randomUUID();
@@ -158,7 +167,8 @@ export async function issue(
  * 以驗證碼換取一次動作許可。檢查順序:觸發冷卻 → 目前有效的驗證碼 → 比對雜湊 → 條件式標記已使用（含冷卻條件）。
  * 冷卻中 → cooldown（不比對、不消耗碼）;
  * 沒有有效的碼（過期、已用、已作廢、錯滿、從未要求、別的 session 發的）→ invalid;
- * 碼不符 → 累加嘗試次數（錯滿即作廢）→ mismatch;
+ * 碼不符但等於同 session 上一組已作廢的碼（重新要求後的舊碼）→ invalid,不累加嘗試次數;
+ * 其他碼不符 → 累加嘗試次數（錯滿即作廢）→ mismatch;
  * 標記已使用時被並發請求搶先 → 同一組碼 invalid,別組碼搶先開始冷卻 → cooldown。只有 ok 才可以執行動作。
  */
 export async function consume(
@@ -173,11 +183,15 @@ export async function consume(
   const cooldown = await cooldownRemaining(env, purpose, new Date(now));
   if (cooldown !== null) return { status: "cooldown", retryAfter: cooldown };
 
-  const challenge = await findActiveChallenge(env.DB, { sessionId: session.id, purpose, now });
+  const { maxAttempts } = settings(env);
+  const challenge = await findActiveChallenge(env.DB, { sessionId: session.id, purpose, now, maxAttempts });
   if (!challenge) return { status: "invalid" };
 
   if ((await hashCode(challenge.id, code)) !== challenge.codeHash) {
-    const { maxAttempts } = settings(env);
+    // 重新要求後送來的舊碼:不是猜錯,回 invalid,不消耗新碼的嘗試次數
+    const previous = await findLatestRevokedChallenge(env.DB, { sessionId: session.id, purpose });
+    if (previous && (await hashCode(previous.id, code)) === previous.codeHash) return { status: "invalid" };
+
     const attempts = await recordFailedAttempt(env.DB, { id: challenge.id, maxAttempts, now });
     // 比對期間被並發請求用掉或作廢
     if (attempts === null) return { status: "invalid" };

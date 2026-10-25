@@ -1,15 +1,18 @@
 // admin_challenges（觸發驗證的驗證碼）的 DB 存取。規則（有效期、比對、次數）在 src/services/challenge.ts。
-import { and, desc, eq, gt, isNotNull, isNull, notExists, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, lt, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { makeDb } from "../db/client";
 import { adminChallenges } from "../../db/schema";
+import type { ChallengePurpose } from "../services/challenge";
 
 export type Challenge = typeof adminChallenges.$inferSelect;
 /** 新發的驗證碼:作廢/使用時間與嘗試次數由 DB 預設（空、空、0）。 */
-export type NewChallenge = Pick<Challenge, "id" | "purpose" | "userId" | "sessionId" | "codeHash" | "createdAt" | "expiresAt">;
+export type NewChallenge = Pick<Challenge, "id" | "userId" | "sessionId" | "codeHash" | "createdAt" | "expiresAt"> & {
+  purpose: ChallengePurpose;
+};
 
 /** 同 session、同 purpose 仍未使用、未作廢的列。 */
-const openFor = (sessionId: string, purpose: string) =>
+const openFor = (sessionId: string, purpose: ChallengePurpose) =>
   and(
     eq(adminChallenges.sessionId, sessionId),
     eq(adminChallenges.purpose, purpose),
@@ -29,15 +32,42 @@ export async function replaceActiveChallenge(db: D1Database, challenge: NewChall
   ]);
 }
 
-/** 目前有效的驗證碼:同 session、同 purpose 最新一筆未作廢、未使用、未過期（expires_at > now）者;沒有則 null。 */
+/**
+ * 目前有效的驗證碼:同 session、同 purpose 最新一筆未作廢、未使用、未過期（expires_at > now）、
+ * 錯誤次數未達 maxAttempts 者;沒有則 null。以目前的上限判斷,調低上限立即生效。
+ */
 export async function findActiveChallenge(
   db: D1Database,
-  { sessionId, purpose, now }: { sessionId: string; purpose: string; now: string },
+  { sessionId, purpose, now, maxAttempts }: { sessionId: string; purpose: ChallengePurpose; now: string; maxAttempts: number },
 ): Promise<Challenge | null> {
   const [row] = await makeDb(db)
     .select()
     .from(adminChallenges)
-    .where(and(openFor(sessionId, purpose), gt(adminChallenges.expiresAt, now)))
+    .where(and(openFor(sessionId, purpose), gt(adminChallenges.expiresAt, now), lt(adminChallenges.attempts, maxAttempts)))
+    .orderBy(desc(adminChallenges.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * 同 session、同 purpose 最近一筆已作廢（被新碼取代或錯滿）且未使用的驗證碼;沒有則 null。
+ * 用來辨認「重新要求後送來的舊碼」,不把它算成新碼的錯誤嘗試。
+ */
+export async function findLatestRevokedChallenge(
+  db: D1Database,
+  { sessionId, purpose }: { sessionId: string; purpose: ChallengePurpose },
+): Promise<Challenge | null> {
+  const [row] = await makeDb(db)
+    .select()
+    .from(adminChallenges)
+    .where(
+      and(
+        eq(adminChallenges.sessionId, sessionId),
+        eq(adminChallenges.purpose, purpose),
+        isNull(adminChallenges.usedAt),
+        isNotNull(adminChallenges.revokedAt),
+      ),
+    )
     .orderBy(desc(adminChallenges.createdAt))
     .limit(1);
   return row ?? null;
@@ -46,7 +76,7 @@ export async function findActiveChallenge(
 /** 觸發冷卻的依據:該 purpose 最近一次被使用的驗證碼（不分使用者與 session）;從未使用過則 null。 */
 export async function findLatestUse(
   db: D1Database,
-  { purpose }: { purpose: string },
+  { purpose }: { purpose: ChallengePurpose },
 ): Promise<{ id: string; usedAt: string } | null> {
   const [row] = await makeDb(db)
     .select({ id: adminChallenges.id, usedAt: adminChallenges.usedAt })
@@ -96,7 +126,7 @@ export async function markChallengeUsed(
  */
 export async function latestChallengeCreatedAt(
   db: D1Database,
-  { userId, purpose }: { userId: string; purpose: string },
+  { userId, purpose }: { userId: string; purpose: ChallengePurpose },
 ): Promise<string | null> {
   const [row] = await makeDb(db)
     .select({ createdAt: adminChallenges.createdAt })
