@@ -13,7 +13,7 @@ vi.mock("../src/repositories/ingest", () => ({ listRuns: vi.fn() }));
 vi.mock("../src/services/ingest", () => ({ runIngest: vi.fn() }));
 vi.mock("../src/services/recovery", async (orig) => ({ ...(await orig()), loadSeries: vi.fn() }));
 
-import { request } from "./entry";
+import { request, signedInAs } from "./entry";
 import {
   getFund, getLatestRisk, getRiskHistory, listCategories, listFullGroups, listFunds, listMatchedKeys,
 } from "../src/repositories/funds";
@@ -30,6 +30,9 @@ import { loadSeries } from "../src/services/recovery";
 
 const env = { DB: {} as D1Database };
 const get = (path: string) => request(path, {}, env);
+// /admin/* 有守門:以管理員身分呼叫
+const ADMIN = "admin@example.com";
+const adminEnv = { ...env, ADMIN_EMAILS: ADMIN };
 
 // 與 D1 經 drizzle 取回的形狀一致(snake_case 別名;nullable 欄可為 null)
 const fundRow = {
@@ -144,10 +147,10 @@ describe("成功回應符合各路由的 response schema", () => {
     vi.mocked(runIngest)
       .mockResolvedValueOnce({ status: "ok", dataTime: "2026-10-22", dataCount: 1, fetched: 1, upserted: 1, note: undefined })
       .mockRejectedValueOnce(new Error("Anue HTTP 500"));
-    const ok = await request("/admin/ingest", { method: "POST" }, env);
+    const ok = await request("/admin/ingest", { method: "POST" }, adminEnv, signedInAs(ADMIN));
     expect(ok.status).toBe(200);
     AdminIngestOk.parse(await ok.json());
-    const err = await request("/admin/ingest", { method: "POST" }, env);
+    const err = await request("/admin/ingest", { method: "POST" }, adminEnv, signedInAs(ADMIN));
     expect(err.status).toBe(500);
     expect(AdminIngestError.parse(await err.json()).message).toBe("Anue HTTP 500");
   });
@@ -212,7 +215,7 @@ describe("回應違反自身 schema", () => {
   it("非正式環境:POST /admin/ingest 成功 payload 漂移 → 500(非 handler 自己的錯誤 JSON)", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(runIngest).mockResolvedValue({ status: "ok" } as never); // 缺 dataTime 等欄位
-    const res = await request("/admin/ingest", { method: "POST" }, env);
+    const res = await request("/admin/ingest", { method: "POST" }, adminEnv, signedInAs(ADMIN));
     expect(res.status).toBe(500);
     expect(res.headers.get("content-type") ?? "").not.toContain("application/json");
     log.mockRestore();

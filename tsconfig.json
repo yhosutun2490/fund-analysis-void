@@ -11,5 +11,5 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "routes/**/*.ts", "crons/**/*.ts", "db/**/*.ts", "*.config.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "routes/**/*.ts", "crons/**/*.ts", "middleware/**/*.ts", "auth.ts","db/**/*.ts", "*.config.ts"]
 }
