@@ -43,6 +43,30 @@ export async function findActiveChallenge(
   return row ?? null;
 }
 
+/**
+ * 同 session、同 purpose 最近一筆已作廢（被新碼取代或錯滿）且未使用的驗證碼;沒有則 null。
+ * 用來辨認「重新要求後送來的舊碼」,不把它算成新碼的錯誤嘗試。
+ */
+export async function findLatestRevokedChallenge(
+  db: D1Database,
+  { sessionId, purpose }: { sessionId: string; purpose: string },
+): Promise<Challenge | null> {
+  const [row] = await makeDb(db)
+    .select()
+    .from(adminChallenges)
+    .where(
+      and(
+        eq(adminChallenges.sessionId, sessionId),
+        eq(adminChallenges.purpose, purpose),
+        isNull(adminChallenges.usedAt),
+        isNotNull(adminChallenges.revokedAt),
+      ),
+    )
+    .orderBy(desc(adminChallenges.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
 /** 觸發冷卻的依據:該 purpose 最近一次被使用的驗證碼（不分使用者與 session）;從未使用過則 null。 */
 export async function findLatestUse(
   db: D1Database,

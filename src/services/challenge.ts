@@ -3,7 +3,7 @@
 import { sendEmail } from "void/email";
 import type { Env } from "../bindings";
 import { EMAIL_FROM } from "../lib/email";
-import { findActiveChallenge, findLatestUse, markChallengeUsed, replaceActiveChallenge } from "../repositories/challenges";
+import { findActiveChallenge, findLatestRevokedChallenge, findLatestUse, markChallengeUsed, replaceActiveChallenge } from "../repositories/challenges";
 // 防濫用:重寄間隔、錯誤次數上限
 import { latestChallengeCreatedAt, recordFailedAttempt } from "../repositories/challenges";
 
@@ -158,7 +158,8 @@ export async function issue(
  * 以驗證碼換取一次動作許可。檢查順序:觸發冷卻 → 目前有效的驗證碼 → 比對雜湊 → 條件式標記已使用（含冷卻條件）。
  * 冷卻中 → cooldown（不比對、不消耗碼）;
  * 沒有有效的碼（過期、已用、已作廢、錯滿、從未要求、別的 session 發的）→ invalid;
- * 碼不符 → 累加嘗試次數（錯滿即作廢）→ mismatch;
+ * 碼不符但等於同 session 上一組已作廢的碼（重新要求後的舊碼）→ invalid,不累加嘗試次數;
+ * 其他碼不符 → 累加嘗試次數（錯滿即作廢）→ mismatch;
  * 標記已使用時被並發請求搶先 → 同一組碼 invalid,別組碼搶先開始冷卻 → cooldown。只有 ok 才可以執行動作。
  */
 export async function consume(
@@ -177,6 +178,10 @@ export async function consume(
   if (!challenge) return { status: "invalid" };
 
   if ((await hashCode(challenge.id, code)) !== challenge.codeHash) {
+    // 重新要求後送來的舊碼:不是猜錯,回 invalid,不消耗新碼的嘗試次數
+    const previous = await findLatestRevokedChallenge(env.DB, { sessionId: session.id, purpose });
+    if (previous && (await hashCode(previous.id, code)) === previous.codeHash) return { status: "invalid" };
+
     const { maxAttempts } = settings(env);
     const attempts = await recordFailedAttempt(env.DB, { id: challenge.id, maxAttempts, now });
     // 比對期間被並發請求用掉或作廢

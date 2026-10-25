@@ -33,6 +33,14 @@ export const fakeChallengeRepository = {
     return active[0] ? { ...active[0] } : null;
   },
 
+  async findLatestRevokedChallenge(_db, { sessionId, purpose }) {
+    await tick();
+    const revoked = [...rows.values()]
+      .filter((r) => r.sessionId === sessionId && r.purpose === purpose && r.revokedAt && !r.usedAt)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return revoked[0] ? { ...revoked[0] } : null;
+  },
+
   async findLatestUse(_db, { purpose }) {
     await tick();
     const used = [...rows.values()]
