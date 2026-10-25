@@ -49,20 +49,23 @@ function positiveInt(raw: string | undefined, fallback: number): number {
   return raw && Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
-/** 正整數 env var（秒）→ 毫秒;未設定或不合法即用預設值。 */
-function seconds(raw: string | undefined, fallback: number): number {
-  return positiveInt(raw, fallback) * 1000;
+/** 秒數 env var → 毫秒;未設定或不合法即用預設秒數。 */
+function secondsEnvToMs(raw: string | undefined, fallbackSeconds: number): number {
+  return positiveInt(raw, fallbackSeconds) * 1000;
 }
+
+/** 剩餘毫秒 → 回應用的秒數（無條件進位,同 Retry-After）。 */
+const ceilSeconds = (ms: number) => Math.ceil(ms / 1000);
 
 /** 參數預設值,可用 env var 覆寫。 */
 function settings(env: Env) {
   return {
     /** 驗證碼有效時間 */
-    ttlMs: seconds(env.CHALLENGE_TTL_SECONDS, 600),
+    ttlMs: secondsEnvToMs(env.CHALLENGE_TTL_SECONDS, 600),
     /** 重寄間隔（回應的 resendAfter） */
-    resendMs: seconds(env.CHALLENGE_RESEND_SECONDS, 60),
+    resendMs: secondsEnvToMs(env.CHALLENGE_RESEND_SECONDS, 60),
     /** 觸發冷卻:最近一次使用驗證碼後多久內不能再要求或觸發 */
-    cooldownMs: seconds(env.CHALLENGE_COOLDOWN_SECONDS, 600),
+    cooldownMs: secondsEnvToMs(env.CHALLENGE_COOLDOWN_SECONDS, 600),
     /** 最多錯誤嘗試次數,錯滿即作廢 */
     maxAttempts: positiveInt(env.CHALLENGE_MAX_ATTEMPTS, 5),
   };
@@ -76,7 +79,7 @@ async function cooldownRemaining(env: Env, purpose: ChallengePurpose, now: Date)
   const latest = await findLatestUse(env.DB, { purpose });
   if (!latest) return null;
   const remainingMs = new Date(latest.usedAt).getTime() + settings(env).cooldownMs - now.getTime();
-  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
+  return remainingMs > 0 ? ceilSeconds(remainingMs) : null;
 }
 
 /** 均勻分布的 6 位數字（含前導 0）:拒絕取樣,避免 2^32 mod 10^6 造成的偏差。 */
@@ -135,7 +138,7 @@ export async function issue(
   const lastCreatedAt = await latestChallengeCreatedAt(env.DB, { userId: user.id, purpose });
   if (lastCreatedAt) {
     const waitMs = Date.parse(lastCreatedAt) + resendMs - now.getTime();
-    if (waitMs > 0) return { status: "resend_too_soon", retryAfter: Math.ceil(waitMs / 1000) };
+    if (waitMs > 0) return { status: "resend_too_soon", retryAfter: ceilSeconds(waitMs) };
   }
 
   const id = crypto.randomUUID();
