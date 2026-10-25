@@ -326,6 +326,21 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     expect(await (await send(code)).json()).toEqual({ error: "challenge_invalid" });
   });
 
+  it("調低 CHALLENGE_MAX_ATTEMPTS 後,錯誤次數已達新上限的碼立即失效 → challenge_invalid", async () => {
+    await requestChallenge();
+    const code = latestCode();
+    for (const attemptsLeft of [4, 3, 2]) {
+      expect(await (await trigger({ code: wrongCode(code) })).json()).toEqual({ error: "code_mismatch", attemptsLeft });
+    }
+
+    // 已錯 3 次;上限改成 3 → 這組碼不再有效,正確碼也不放行
+    const lowered = { ...env, CHALLENGE_MAX_ATTEMPTS: "3" };
+    const res = await trigger({ code }, signedInAs(ADMIN), lowered);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "challenge_invalid" });
+    expect(runIngest).not.toHaveBeenCalled();
+  });
+
   it("抓取失敗 → 500 { status: error, message }", async () => {
     vi.mocked(runIngest).mockRejectedValue(new Error("Anue HTTP 500"));
     await requestChallenge();

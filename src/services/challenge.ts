@@ -174,7 +174,8 @@ export async function consume(
   const cooldown = await cooldownRemaining(env, purpose, new Date(now));
   if (cooldown !== null) return { status: "cooldown", retryAfter: cooldown };
 
-  const challenge = await findActiveChallenge(env.DB, { sessionId: session.id, purpose, now });
+  const { maxAttempts } = settings(env);
+  const challenge = await findActiveChallenge(env.DB, { sessionId: session.id, purpose, now, maxAttempts });
   if (!challenge) return { status: "invalid" };
 
   if ((await hashCode(challenge.id, code)) !== challenge.codeHash) {
@@ -182,7 +183,6 @@ export async function consume(
     const previous = await findLatestRevokedChallenge(env.DB, { sessionId: session.id, purpose });
     if (previous && (await hashCode(previous.id, code)) === previous.codeHash) return { status: "invalid" };
 
-    const { maxAttempts } = settings(env);
     const attempts = await recordFailedAttempt(env.DB, { id: challenge.id, maxAttempts, now });
     // 比對期間被並發請求用掉或作廢
     if (attempts === null) return { status: "invalid" };

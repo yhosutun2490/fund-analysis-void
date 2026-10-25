@@ -1,5 +1,5 @@
 // admin_challenges（觸發驗證的驗證碼）的 DB 存取。規則（有效期、比對、次數）在 src/services/challenge.ts。
-import { and, desc, eq, gt, isNotNull, isNull, notExists, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, lt, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { makeDb } from "../db/client";
 import { adminChallenges } from "../../db/schema";
@@ -29,15 +29,18 @@ export async function replaceActiveChallenge(db: D1Database, challenge: NewChall
   ]);
 }
 
-/** 目前有效的驗證碼:同 session、同 purpose 最新一筆未作廢、未使用、未過期（expires_at > now）者;沒有則 null。 */
+/**
+ * 目前有效的驗證碼:同 session、同 purpose 最新一筆未作廢、未使用、未過期（expires_at > now）、
+ * 錯誤次數未達 maxAttempts 者;沒有則 null。以目前的上限判斷,調低上限立即生效。
+ */
 export async function findActiveChallenge(
   db: D1Database,
-  { sessionId, purpose, now }: { sessionId: string; purpose: string; now: string },
+  { sessionId, purpose, now, maxAttempts }: { sessionId: string; purpose: string; now: string; maxAttempts: number },
 ): Promise<Challenge | null> {
   const [row] = await makeDb(db)
     .select()
     .from(adminChallenges)
-    .where(and(openFor(sessionId, purpose), gt(adminChallenges.expiresAt, now)))
+    .where(and(openFor(sessionId, purpose), gt(adminChallenges.expiresAt, now), lt(adminChallenges.attempts, maxAttempts)))
     .orderBy(desc(adminChallenges.createdAt))
     .limit(1);
   return row ?? null;
