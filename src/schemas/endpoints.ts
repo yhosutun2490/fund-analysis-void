@@ -2,7 +2,7 @@
 // GET /openapi.json 從這裡產生文件,兩者同源。文件端點本身（GET /、GET /openapi.json）不登錄。
 import { z } from "zod";
 import type { Endpoint } from "../lib/openapi";
-import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeInvalid, ChallengeSent } from "./admin";
+import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeCooldown, ChallengeInvalid, ChallengeSent } from "./admin";
 import {
   FundDetailResponse,
   FundHistoryResponse,
@@ -23,7 +23,7 @@ export const endpoints = {
     tag: "admin",
     auth: "session",
     // 401/403 由 admin guard middleware 回應（不經 responds()）,列進契約是為了文件。
-    responses: { 202: ChallengeSent, 401: ErrorResponse, 403: ErrorResponse },
+    responses: { 202: ChallengeSent, 401: ErrorResponse, 403: ErrorResponse, 429: ChallengeCooldown },
   },
   "POST /admin/ingest": {
     summary: "帶驗證碼手動觸發抓取（與 cron 同一流程）",
@@ -37,6 +37,7 @@ export const endpoints = {
       401: ErrorResponse,
       403: ErrorResponse,
       422: ChallengeInvalid,
+      429: ChallengeCooldown,
       500: AdminIngestError,
     },
   },

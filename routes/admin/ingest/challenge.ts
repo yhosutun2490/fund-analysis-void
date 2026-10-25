@@ -13,6 +13,9 @@ export const POST = responds(
     if (!user || !session) return c.json({ error: "unauthorized" }, 401);
 
     const sent = await issue(c.env, user, session, "ingest");
+    if (sent.status === "cooldown") {
+      return c.json({ error: "cooldown", retryAfter: sent.retryAfter }, 429, { "Retry-After": String(sent.retryAfter) });
+    }
     return c.json(
       { status: sent.status, expiresAt: sent.expiresAt.toISOString(), resendAfter: sent.resendAfter.toISOString() },
       202,

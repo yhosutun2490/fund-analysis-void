@@ -19,7 +19,15 @@ export const ChallengeSent = z.strictObject({
 /** 沒有有效的驗證碼:過期、已使用、已作廢、從未要求,或不是這個 session 要求的。 */
 export const ChallengeInvalid = z.strictObject({ error: z.literal("challenge_invalid") });
 
-export const AdminIngestOk = z.strictObject({
+/** 觸發冷卻中（手動觸發開始後一段時間內）:retryAfter 為剩餘秒數,與 Retry-After 標頭相同。 */
+export const ChallengeCooldown = z
+  .strictObject({
+    error: z.literal("cooldown"),
+    retryAfter: z.number().int().positive().meta({ description: "冷卻剩餘秒數（同 Retry-After 標頭）" }),
+  })
+  .meta({ description: "觸發冷卻中:手動觸發開始後 10 分鐘內（全域,不分管理員與 session）不能再要求驗證碼或觸發" });
+
+export const AdminIngestOk =z.strictObject({
   status: z.literal("ok"),
   dataTime: z.string(),
   dataCount: z.number().int().nonnegative(),
