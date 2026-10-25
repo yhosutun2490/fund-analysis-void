@@ -10,9 +10,13 @@ async function openapi() {
   return (await res.json()) as {
     openapi: string;
     info: { title: string; version: string; description: string };
-    paths: Record<string, Record<string, { responses: Record<string, JsonResponse> }>>;
+    paths: Record<string, Record<string, Operation>>;
   };
 }
+
+type Parameter = { name: string; in: "path" | "query"; required: boolean; schema: Record<string, any>; description?: string };
+type Operation = { description?: string; parameters?: Parameter[]; responses: Record<string, JsonResponse> };
+const param = (op: Operation, name: string) => op.parameters?.find((p) => p.name === name);
 
 type JsonResponse = { content: { "application/json": { schema: Record<string, any> } } };
 const schemaOf = (r: JsonResponse) => r.content["application/json"].schema;
@@ -41,5 +45,54 @@ describe("GET /openapi.json", () => {
     expect(ok.additionalProperties).toBe(false);
     expect(ok.required).toEqual(["status", "dataTime", "dataCount", "fetched", "upserted"]);
     expect(schemaOf(responses["500"]).properties.status.const).toBe("error");
+  });
+
+  it("動態段寫成 {id};recovery 列出 200/400/404/502,disclaimer 為 const", async () => {
+    const { responses } = (await openapi()).paths["/api/funds/{id}/recovery"].get;
+    expect(Object.keys(responses)).toEqual(["200", "400", "404", "502"]);
+    expect(schemaOf(responses["200"]).properties.disclaimer.const).toBe(DISCLAIMER);
+    expect(schemaOf(responses["200"]).properties.basis.const).toBe("total_return");
+    const v400 = schemaOf(responses["400"]);
+    expect(v400.properties.error.const).toBe("Validation failed");
+    expect(v400.properties.issues.items.properties.slot.enum).toEqual(["query", "params", "body"]);
+    expect(schemaOf(responses["404"]).properties.error.type).toBe("string");
+  });
+
+  it("path 與 query 參數:型別、範圍、預設值、是否必填由 zod schema 推出", async () => {
+    const op = (await openapi()).paths["/api/funds/{id}/recovery"].get;
+    expect(param(op, "id")).toMatchObject({ in: "path", required: true, schema: { type: "string", minLength: 1 } });
+    expect(param(op, "minDepth")).toMatchObject({
+      in: "query",
+      required: false,
+      schema: { type: "number", exclusiveMinimum: 0, exclusiveMaximum: 100, default: 10 },
+    });
+    expect(param(op, "from")).toMatchObject({ in: "query", required: false, schema: { type: "string" } });
+    expect(op.parameters!.map((p) => p.name)).toEqual(["id", "from", "to", "minDepth", "refresh"]);
+  });
+
+  it("/api/funds 系列:空值視同未給的參數仍呈現實際型別,各端點列出自己的狀態碼", async () => {
+    const { paths } = await openapi();
+    const list = paths["/api/funds"].get;
+    expect(param(list, "minSharpe3y")).toMatchObject({ required: false, schema: { type: "number" } });
+    expect(param(list, "maxStd1y")).toMatchObject({ required: false, schema: { type: "number" } });
+    expect(param(list, "order")).toMatchObject({ required: false, schema: { enum: ["asc", "desc"], default: "desc" } });
+    expect(param(list, "limit")).toMatchObject({ required: false, schema: { type: "integer", minimum: 0, default: 50 } });
+    expect(Object.keys(list.responses)).toEqual(["200", "400"]);
+    expect(schemaOf(list.responses["200"]).properties.disclaimer.const).toBe(DISCLAIMER);
+    expect(Object.keys(paths["/api/funds/{id}"].get.responses)).toEqual(["200", "400", "404"]);
+    expect(Object.keys(paths["/api/funds/{id}/history"].get.responses)).toEqual(["200", "400"]);
+    expect(param(paths["/api/funds/{id}/history"].get, "id")).toMatchObject({ in: "path", required: true });
+  });
+
+  it("參數帶說明與範例;schema 層級規則寫進端點說明", async () => {
+    const { paths } = await openapi();
+    const list = paths["/api/funds"].get;
+    expect(param(list, "sort")!.schema.examples).toEqual(["sharpe_3y"]);
+    expect(param(list, "limit")!.schema.description).toContain("500");
+    const recovery = paths["/api/funds/{id}/recovery"].get;
+    expect(recovery.description).toContain("from 不可晚於 to");
+    expect(param(recovery, "refresh")!.schema).toMatchObject({ type: "string", examples: ["false"] });
+    expect(param(recovery, "refresh")!.schema.description).toBeTruthy();
+    expect(param(recovery, "from")!.schema.examples).toEqual(["2020-01-01"]);
   });
 });

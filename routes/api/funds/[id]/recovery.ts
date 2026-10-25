@@ -3,17 +3,19 @@ import { defineHandler } from "void";
 import { AnueSchemaError } from "../../../../src/anue/schema";
 import { computeEpisodes, computeEvents, computeLumpSum, computeMdd, recentReturns, sliceWindow } from "../../../../src/domain/recovery";
 import { getFund } from "../../../../src/repositories/funds";
-import { FundIdParam, RecoveryQuery, RecoveryResponse } from "../../../../src/schemas/funds";
-import { DISCLAIMER, ErrorResponse, ValidationErrorResponse } from "../../../../src/schemas/shared";
+import { endpoints } from "../../../../src/schemas/endpoints";
+import { DISCLAIMER } from "../../../../src/schemas/shared";
 import { loadSeries, UpstreamUnavailable } from "../../../../src/services/recovery";
 import { responds } from "../../../../src/lib/validation";
 
 /** 窗口內有效點少於此數 → 指標回 null 並標 series_too_short。 */
 const MIN_POINTS = 60;
 
+const endpoint = endpoints["GET /api/funds/:id/recovery"];
+
 export const GET = responds(
-  { 200: RecoveryResponse, 400: ValidationErrorResponse, 404: ErrorResponse, 502: ErrorResponse },
-  defineHandler.withValidator({ params: FundIdParam, query: RecoveryQuery })(async (c, { params, query }) => {
+  endpoint.responses,
+  defineHandler.withValidator({ params: endpoint.params, query: endpoint.query })(async (c, { params, query }) => {
     const { id } = params;
     const { from, to, minDepth, refresh } = query;
     const fund = (await getFund(c.env.DB, id)) as { fund_id: string; name?: string; currency?: string; setup_date?: string | null } | null;
