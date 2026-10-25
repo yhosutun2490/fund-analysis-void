@@ -4,6 +4,8 @@ import { sendEmail } from "void/email";
 import type { Env } from "../bindings";
 import { EMAIL_FROM } from "../lib/email";
 import { findActiveChallenge, findLatestUse, markChallengeUsed, replaceActiveChallenge } from "../repositories/challenges";
+// 防濫用:重寄間隔、錯誤次數上限
+import { latestChallengeCreatedAt, recordFailedAttempt } from "../repositories/challenges";
 
 /** 驗證碼保護的管理員動作。目前只有 ingest;資料表的 purpose 欄保留擴充。 */
 export type ChallengePurpose = "ingest";
@@ -19,15 +21,31 @@ export interface ChallengeSession {
 
 /** 觸發冷卻中:retryAfter 為剩餘秒數。 */
 export type Cooldown = { status: "cooldown"; retryAfter: number };
-export type IssueResult = { status: "sent"; expiresAt: Date; resendAfter: Date } | Cooldown;
-export type ConsumeResult = { status: "ok" } | { status: "invalid" } | Cooldown;
+export type IssueResult =
+  | { status: "sent"; expiresAt: Date; resendAfter: Date }
+  | Cooldown
+  /** 距上次發碼未滿重寄間隔;retryAfter 為還要等的秒數（無條件進位）。 */
+  | { status: "resend_too_soon"; retryAfter: number }
+  /** 寄信失敗,沒有寫入驗證碼;reason 為供應商錯誤代碼,只供記錄。 */
+  | { status: "send_failed"; reason: string };
+export type ConsumeResult =
+  | { status: "ok" }
+  | { status: "invalid" }
+  | Cooldown
+  /** 碼不符;attemptsLeft 為 0 表示這次錯滿、驗證碼已作廢。 */
+  | { status: "mismatch"; attemptsLeft: number };
 
 const SUBJECT_ACTION: Record<ChallengePurpose, string> = { ingest: "手動觸發抓取" };
 
+/** 正整數 env var;未設定或不合法即用預設值。 */
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const n = Number(raw);
+  return raw && Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
 /** 正整數 env var（秒）→ 毫秒;未設定或不合法即用預設值。 */
 function seconds(raw: string | undefined, fallback: number): number {
-  const n = Number(raw);
-  return (raw && Number.isInteger(n) && n > 0 ? n : fallback) * 1000;
+  return positiveInt(raw, fallback) * 1000;
 }
 
 /** 參數預設值,可用 env var 覆寫。 */
@@ -39,6 +57,8 @@ function settings(env: Env) {
     resendMs: seconds(env.CHALLENGE_RESEND_SECONDS, 60),
     /** 觸發冷卻:最近一次使用驗證碼後多久內不能再要求或觸發 */
     cooldownMs: seconds(env.CHALLENGE_COOLDOWN_SECONDS, 600),
+    /** 最多錯誤嘗試次數,錯滿即作廢 */
+    maxAttempts: positiveInt(env.CHALLENGE_MAX_ATTEMPTS, 5),
   };
 }
 
@@ -89,8 +109,8 @@ function challengeMail(purpose: ChallengePurpose, code: string, expiresAt: Date)
 }
 
 /**
- * 發一組新驗證碼寄給 session 使用者:產生驗證碼 → 寄信 → 寄信成功才寫入（同時作廢同 session 的舊碼）。
- * 寄信失敗不留下可用的碼。觸發冷卻中 → cooldown,不寄信。
+ * 發一組新驗證碼寄給 session 使用者:觸發冷卻 → 重寄間隔 → 產生驗證碼 → 寄信 → 寄信成功才寫入（同時作廢同 session 的舊碼）。
+ * 冷卻中 → cooldown、未滿重寄間隔 → resend_too_soon,都不寄信。寄信失敗不留下可用的碼,也不占用重寄間隔。
  */
 export async function issue(
   env: Env,
@@ -105,6 +125,13 @@ export async function issue(
   const cooldown = await cooldownRemaining(env, purpose, now);
   if (cooldown !== null) return { status: "cooldown", retryAfter: cooldown };
 
+  // 重寄間隔:以使用者計,距上次成功發碼未滿 resendMs 就不寄信
+  const lastCreatedAt = await latestChallengeCreatedAt(env.DB, { userId: user.id, purpose });
+  if (lastCreatedAt) {
+    const waitMs = Date.parse(lastCreatedAt) + resendMs - now.getTime();
+    if (waitMs > 0) return { status: "resend_too_soon", retryAfter: Math.ceil(waitMs / 1000) };
+  }
+
   const id = crypto.randomUUID();
   const code = generateCode();
   const expiresAt = new Date(now.getTime() + ttlMs);
@@ -112,7 +139,7 @@ export async function issue(
   const sent = await sendEmail({ from: EMAIL_FROM, to: user.email, ...challengeMail(purpose, code, expiresAt) });
   if (!sent.ok) {
     const reason = "error" in sent ? sent.error.code : sent.deliveries.map((d) => (d.ok ? "ok" : d.error.code)).join(",");
-    throw new Error(`驗證碼信件寄送失敗: ${reason}`);
+    return { status: "send_failed", reason };
   }
 
   await replaceActiveChallenge(env.DB, {
@@ -130,7 +157,8 @@ export async function issue(
 /**
  * 以驗證碼換取一次動作許可。檢查順序:觸發冷卻 → 目前有效的驗證碼 → 比對雜湊 → 條件式標記已使用（含冷卻條件）。
  * 冷卻中 → cooldown（不比對、不消耗碼）;
- * 沒有有效的碼（過期、已用、已作廢、從未要求、別的 session 發的）或碼不符 → invalid;
+ * 沒有有效的碼（過期、已用、已作廢、錯滿、從未要求、別的 session 發的）→ invalid;
+ * 碼不符 → 累加嘗試次數（錯滿即作廢）→ mismatch;
  * 標記已使用時被並發請求搶先 → 同一組碼 invalid,別組碼搶先開始冷卻 → cooldown。只有 ok 才可以執行動作。
  */
 export async function consume(
@@ -148,7 +176,13 @@ export async function consume(
   const challenge = await findActiveChallenge(env.DB, { sessionId: session.id, purpose, now });
   if (!challenge) return { status: "invalid" };
 
-  if ((await hashCode(challenge.id, code)) !== challenge.codeHash) return { status: "invalid" };
+  if ((await hashCode(challenge.id, code)) !== challenge.codeHash) {
+    const { maxAttempts } = settings(env);
+    const attempts = await recordFailedAttempt(env.DB, { id: challenge.id, maxAttempts, now });
+    // 比對期間被並發請求用掉或作廢
+    if (attempts === null) return { status: "invalid" };
+    return { status: "mismatch", attemptsLeft: Math.max(0, maxAttempts - attempts) };
+  }
 
   const cooldownSince = new Date(Date.parse(now) - settings(env).cooldownMs).toISOString();
   const marked = await markChallengeUsed(env.DB, { id: challenge.id, now, cooldownSince });

@@ -21,6 +21,9 @@ export const POST = responds(
         "Retry-After": String(challenge.retryAfter),
       });
     }
+    if (challenge.status === "mismatch") {
+      return c.json({ error: "code_mismatch", attemptsLeft: challenge.attemptsLeft }, 422);
+    }
     if (challenge.status !== "ok") return c.json({ error: "challenge_invalid" }, 422);
 
     try {

@@ -3,15 +3,23 @@ import { createEmailTestHarness, type EmailTestHarness } from "void/email/testin
 
 vi.mock("../src/services/ingest", () => ({ runIngest: vi.fn() }));
 vi.mock("../src/repositories/challenges", async () => (await import("./fakes/challenge-repository")).fakeChallengeRepository);
+// email harness 只能擷取、無法模擬寄信失敗:sendEmail 預設照常呼叫真的實作(信仍進 harness),
+// 只有寄信失敗的情境以 mockResolvedValueOnce 換掉一次。
+vi.mock("void/email", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("void/email")>();
+  return { ...actual, sendEmail: vi.fn(actual.sendEmail) };
+});
 
 import { request, signedInAs } from "./entry";
 import { resetFakeChallenges } from "./fakes/challenge-repository";
 import { runIngest } from "../src/services/ingest";
+import { sendEmail } from "void/email";
 import scheduled from "../crons/daily-ingest";
 import { ValidationErrorResponse } from "../src/schemas/shared";
 
 const ADMIN = "admin@example.com";
-const env = { DB: {} as D1Database, ADMIN_EMAILS: ADMIN };
+const OTHER_ADMIN = "other-admin@example.com";
+const env = { DB: {} as D1Database, ADMIN_EMAILS: `${ADMIN},${OTHER_ADMIN}` };
 
 let inbox: EmailTestHarness;
 
@@ -54,6 +62,18 @@ function otherSession() {
   return { ...auth, session: { ...auth.session!, id: "other-session", token: "other-token" } };
 }
 
+/**
+ * 另一位管理員(不同使用者、不同信箱、不同 session)。重寄間隔以使用者計,
+ * 需要「同一時刻另有一組有效碼」的冷卻情境用這個,而不是同一使用者的 otherSession()。
+ */
+function otherAdmin() {
+  const auth = signedInAs(OTHER_ADMIN);
+  return {
+    user: { ...auth.user!, id: "other-user" },
+    session: { ...auth.session!, id: "other-admin-session", token: "other-admin-token", userId: "other-user" },
+  };
+}
+
 /** 一定不等於 code 的另一組 6 位數碼。 */
 const wrongCode = (code: string) => String((Number(code) + 1) % 1_000_000).padStart(6, "0");
 
@@ -79,6 +99,58 @@ describe("POST /admin/ingest/challenge — 要求驗證碼", () => {
     expect(text).toContain("台灣時間");
     expect(text).toContain("若非本人操作，請立即更改密碼");
     expect(text).not.toMatch(/https?:|www\.|\/\//i);
+  });
+
+  it("60 秒內再要求 → 429 resend_too_soon + Retry-After,不寄信;60 秒後可再要求", async () => {
+    await requestChallenge();
+
+    vi.setSystemTime(new Date("2026-10-25T00:00:30.200Z"));
+    const tooSoon = await requestChallenge();
+    expect(tooSoon.status).toBe(429);
+    // 剩 29.8 秒 → 無條件進位成 30
+    expect(tooSoon.headers.get("Retry-After")).toBe("30");
+    expect(await tooSoon.json()).toEqual({ error: "resend_too_soon", retryAfter: 30 });
+    expect(inbox.messages).toHaveLength(1);
+
+    vi.setSystemTime(new Date("2026-10-25T00:01:00Z"));
+    expect((await requestChallenge()).status).toBe(202);
+    expect(inbox.messages).toHaveLength(2);
+  });
+
+  it("重寄間隔以收件人(使用者)計:同帳號的別的 session 60 秒內要求也被擋", async () => {
+    await requestChallenge();
+    vi.setSystemTime(new Date("2026-10-25T00:00:10Z"));
+    const res = await requestChallenge(otherSession());
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "resend_too_soon", retryAfter: 50 });
+    expect(inbox.messages).toHaveLength(1);
+  });
+
+  it.each([
+    ["寄送失敗", { ok: false, error: { code: "UPSTREAM_ERROR", message: "provider down" } }],
+    ["收件人被拒", { ok: false, deliveries: [{ recipient: ADMIN, ok: false, error: { code: "UNVERIFIED_DESTINATION", message: "x" } }] }],
+  ] as const)("%s → 502 email_send_failed,不留下可用的碼,立刻重新要求不受重寄間隔限制", async (_, failure) => {
+    vi.mocked(sendEmail).mockResolvedValueOnce(failure as Awaited<ReturnType<typeof sendEmail>>);
+    const failed = await requestChallenge();
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toEqual({ error: "email_send_failed" });
+
+    // 寄信失敗沒有寫入 challenge:任何碼都是 challenge_invalid
+    const res = await trigger({ code: "123456" });
+    expect(await res.json()).toEqual({ error: "challenge_invalid" });
+
+    const retry = await requestChallenge();
+    expect(retry.status).toBe(202);
+    expect(inbox.messages).toHaveLength(1);
+  });
+
+  it("重寄間隔可用 CHALLENGE_RESEND_SECONDS 覆寫", async () => {
+    const quick = { ...env, CHALLENGE_RESEND_SECONDS: "10" };
+    const first = await request("/admin/ingest/challenge", { method: "POST" }, quick, signedInAs(ADMIN));
+    expect(await first.json()).toMatchObject({ resendAfter: "2026-10-25T00:00:10.000Z" });
+
+    vi.setSystemTime(new Date("2026-10-25T00:00:10Z"));
+    expect((await request("/admin/ingest/challenge", { method: "POST" }, quick, signedInAs(ADMIN))).status).toBe(202);
   });
 });
 
@@ -127,7 +199,7 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     expect(await res.json()).toMatchObject({ expiresAt: "2026-10-25T00:02:00.000Z" });
   });
 
-  it("重新要求後舊碼 → challenge_invalid,新碼可用", async () => {
+  it("重新要求後舊碼被拒(對目前有效的新碼而言就是錯碼 → code_mismatch),新碼可用", async () => {
     await requestChallenge();
     const oldCode = latestCode();
     vi.setSystemTime(new Date("2026-10-25T00:02:00Z"));
@@ -138,7 +210,7 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
 
     const old = await trigger({ code: oldCode });
     expect(old.status).toBe(422);
-    expect(await old.json()).toEqual({ error: "challenge_invalid" });
+    expect(await old.json()).toEqual({ error: "code_mismatch", attemptsLeft: 4 });
 
     expect((await trigger({ code: newCode })).status).toBe(200);
     expect(runIngest).toHaveBeenCalledOnce();
@@ -169,7 +241,7 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     ["7 位數", { code: "1234567" }],
     ["非數字", { code: "12a456" }],
     ["數字型別", { code: 123456 }],
-  ])("body %s → 400 ValidationErrorResponse,不執行抓取,碼仍可用", async (_, body) => {
+  ])("body %s → 400 ValidationErrorResponse,不執行抓取,不消耗嘗試次數,碼仍可用", async (_, body) => {
     await requestChallenge();
     const res = await trigger(body);
     expect(res.status).toBe(400);
@@ -179,6 +251,8 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     });
     expect(runIngest).not.toHaveBeenCalled();
 
+    // 400 之後第一次錯碼仍是 4 次機會
+    expect(await (await trigger({ code: wrongCode(latestCode()) })).json()).toEqual({ error: "code_mismatch", attemptsLeft: 4 });
     expect((await trigger({ code: latestCode() })).status).toBe(200);
   });
 
@@ -202,11 +276,49 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     expect(runIngest).toHaveBeenCalledOnce();
   });
 
-  it("碼不符 → 422,不執行抓取", async () => {
+  it("碼不符 → 422 code_mismatch,attemptsLeft 逐次遞減,不執行抓取;還有機會時正確碼仍可用", async () => {
     await requestChallenge();
-    const res = await trigger({ code: wrongCode(latestCode()) });
-    expect(res.status).toBe(422);
+    const code = latestCode();
+
+    for (const attemptsLeft of [4, 3]) {
+      const res = await trigger({ code: wrongCode(code) });
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ error: "code_mismatch", attemptsLeft });
+    }
     expect(runIngest).not.toHaveBeenCalled();
+
+    expect((await trigger({ code })).status).toBe(200);
+  });
+
+  it("錯滿 5 次即作廢(第 5 次 attemptsLeft 0),之後正確碼也 → challenge_invalid", async () => {
+    await requestChallenge();
+    const code = latestCode();
+
+    for (const attemptsLeft of [4, 3, 2, 1, 0]) {
+      expect(await (await trigger({ code: wrongCode(code) })).json()).toEqual({ error: "code_mismatch", attemptsLeft });
+    }
+
+    const res = await trigger({ code });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "challenge_invalid" });
+    expect(runIngest).not.toHaveBeenCalled();
+  });
+
+  it("嘗試次數上限可用 CHALLENGE_MAX_ATTEMPTS 覆寫", async () => {
+    const strict = { ...env, CHALLENGE_MAX_ATTEMPTS: "2" };
+    await request("/admin/ingest/challenge", { method: "POST" }, strict, signedInAs(ADMIN));
+    const code = latestCode();
+    const send = (c: string) =>
+      request(
+        "/admin/ingest",
+        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: c }) },
+        strict,
+        signedInAs(ADMIN),
+      );
+
+    expect(await (await send(wrongCode(code))).json()).toEqual({ error: "code_mismatch", attemptsLeft: 1 });
+    expect(await (await send(wrongCode(code))).json()).toEqual({ error: "code_mismatch", attemptsLeft: 0 });
+    expect(await (await send(code)).json()).toEqual({ error: "challenge_invalid" });
   });
 
   it("抓取失敗 → 500 { status: error, message }", async () => {
@@ -271,13 +383,13 @@ describe("觸發冷卻:手動觸發開始後 10 分鐘內不能要求驗證碼�
   });
 
   it("冷卻開始前就要的有效碼,冷卻中使用 → 429 cooldown,不抓取、碼不被消耗", async () => {
-    // 別的 session 先要一組碼(10 分鐘有效),本 session 接著觸發 → 冷卻開始
-    await requestChallenge(otherSession());
+    // 另一位管理員先要一組碼(10 分鐘有效),本 session 接著觸發 → 冷卻開始
+    await requestChallenge(otherAdmin());
     const early = latestCode();
     await triggerOnce();
 
     vi.setSystemTime(new Date("2026-10-25T00:09:59.500Z"));
-    const res = await trigger({ code: early }, otherSession());
+    const res = await trigger({ code: early }, otherAdmin());
     expect(res.status).toBe(429);
     expect(res.headers.get("retry-after")).toBe("1");
     expect(await res.json()).toEqual({ error: "cooldown", retryAfter: 1 });
@@ -286,18 +398,18 @@ describe("觸發冷卻:手動觸發開始後 10 分鐘內不能要求驗證碼�
 
   it("被冷卻擋下的碼沒有被消耗:冷卻結束後(CHALLENGE_COOLDOWN_SECONDS 覆寫為 120)仍可觸發", async () => {
     const short = { ...env, CHALLENGE_COOLDOWN_SECONDS: "120" };
-    await requestChallenge(otherSession(), short);
+    await requestChallenge(otherAdmin(), short);
     const early = latestCode();
     await requestChallenge(signedInAs(ADMIN), short);
     expect((await trigger({ code: latestCode() }, signedInAs(ADMIN), short)).status).toBe(200);
 
     vi.setSystemTime(new Date("2026-10-25T00:01:00Z"));
-    const blocked = await trigger({ code: early }, otherSession(), short);
+    const blocked = await trigger({ code: early }, otherAdmin(), short);
     expect(blocked.status).toBe(429);
     expect(await blocked.json()).toEqual({ error: "cooldown", retryAfter: 60 });
 
     vi.setSystemTime(new Date("2026-10-25T00:02:00Z"));
-    expect((await trigger({ code: early }, otherSession(), short)).status).toBe(200);
+    expect((await trigger({ code: early }, otherAdmin(), short)).status).toBe(200);
     expect(runIngest).toHaveBeenCalledTimes(2);
   });
 
@@ -366,14 +478,14 @@ describe("觸發冷卻:手動觸發開始後 10 分鐘內不能要求驗證碼�
 
   it("兩個 session 同時帶各自的有效碼觸發 → 恰好一個 200、另一個 429 cooldown 且碼不被消耗", async () => {
     const short = { ...env, CHALLENGE_COOLDOWN_SECONDS: "60" };
-    await requestChallenge(otherSession(), short);
+    await requestChallenge(otherAdmin(), short);
     const otherCode = latestCode();
     await requestChallenge(signedInAs(ADMIN), short);
     const ownCode = latestCode();
 
     const results = await Promise.all([
       trigger({ code: ownCode }, signedInAs(ADMIN), short),
-      trigger({ code: otherCode }, otherSession(), short),
+      trigger({ code: otherCode }, otherAdmin(), short),
     ]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 429]);
     const loser = results.find((r) => r.status === 429)!;
@@ -385,16 +497,16 @@ describe("觸發冷卻:手動觸發開始後 10 分鐘內不能要求驗證碼�
     const retry =
       results[0].status === 429
         ? await trigger({ code: ownCode }, signedInAs(ADMIN), short)
-        : await trigger({ code: otherCode }, otherSession(), short);
+        : await trigger({ code: otherCode }, otherAdmin(), short);
     expect(retry.status).toBe(200);
   });
 
   it("冷卻中帶錯碼 → 429 cooldown(冷卻先於驗證碼檢查)", async () => {
-    await requestChallenge(otherSession());
+    await requestChallenge(otherAdmin());
     const early = latestCode();
     await triggerOnce();
 
-    const res = await trigger({ code: wrongCode(early) }, otherSession());
+    const res = await trigger({ code: wrongCode(early) }, otherAdmin());
     expect(res.status).toBe(429);
     expect(await res.json()).toEqual({ error: "cooldown", retryAfter: 600 });
   });

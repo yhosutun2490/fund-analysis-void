@@ -93,7 +93,7 @@ describe("GET /openapi.json", () => {
   it("POST /admin/ingest/challenge:沒有 requestBody,202 回 { status: sent, expiresAt, resendAfter }", async () => {
     const op = (await openapi()).paths["/admin/ingest/challenge"].post;
     expect(op).not.toHaveProperty("requestBody");
-    expect(Object.keys(op.responses)).toEqual(["202", "401", "403", "429"]);
+    expect(Object.keys(op.responses)).toEqual(["202", "401", "403", "429", "502"]);
     const sent = schemaOf(op.responses["202"]);
     expect(sent.properties.status.const).toBe("sent");
     expect(sent.properties.expiresAt).toMatchObject({ type: "string", format: "date-time" });
@@ -102,16 +102,27 @@ describe("GET /openapi.json", () => {
     expect(sent.additionalProperties).toBe(false);
   });
 
-  it.each(["/admin/ingest", "/admin/ingest/challenge"])(
-    "POST %s:429 回 { error: cooldown, retryAfter }",
-    async (path) => {
-      const cooldown = schemaOf((await openapi()).paths[path].post.responses["429"]);
-      expect(cooldown.properties.error.const).toBe("cooldown");
-      expect(cooldown.properties.retryAfter).toMatchObject({ type: "integer", exclusiveMinimum: 0 });
-      expect(cooldown.required).toEqual(["error", "retryAfter"]);
-      expect(cooldown.additionalProperties).toBe(false);
-    },
-  );
+  it.each([
+    ["/admin/ingest", ["cooldown"]],
+    ["/admin/ingest/challenge", ["cooldown", "resend_too_soon"]],
+  ])("POST %s:429 回 { error: %j 之一, retryAfter }", async (path, errors) => {
+    const schema = schemaOf((await openapi()).paths[path].post.responses["429"]);
+    const variants: Record<string, any>[] = schema.anyOf ?? [schema];
+    expect(variants.map((v) => v.properties.error.const)).toEqual(errors);
+    for (const v of variants) {
+      expect(v.properties.retryAfter).toMatchObject({ type: "integer", exclusiveMinimum: 0 });
+      expect(v.required).toEqual(["error", "retryAfter"]);
+      expect(v.additionalProperties).toBe(false);
+    }
+  });
+
+  it("POST /admin/ingest/challenge:502 寄信失敗回 { error: email_send_failed }", async () => {
+    const { responses } = (await openapi()).paths["/admin/ingest/challenge"].post;
+    const failed = schemaOf(responses["502"]);
+    expect(failed.properties.error.const).toBe("email_send_failed");
+    expect(failed.required).toEqual(["error"]);
+    expect(failed.additionalProperties).toBe(false);
+  });
 
   it("POST /admin/ingest:requestBody 為 6 位數 code;列出 200/400/401/403/422/429/500", async () => {
     const op = (await openapi()).paths["/admin/ingest"].post;
@@ -124,7 +135,13 @@ describe("GET /openapi.json", () => {
     // 400:欄位驗證失敗,或 body 不是 JSON
     const bad = schemaOf(op.responses["400"]).anyOf.map((s: Record<string, any>) => s.properties.error.const);
     expect(bad).toEqual(["Validation failed", "Invalid JSON body"]);
-    expect(schemaOf(op.responses["422"]).properties.error.const).toBe("challenge_invalid");
+    // 422:碼不符(帶剩餘次數),或沒有有效的驗證碼
+    const [mismatch, invalid] = schemaOf(op.responses["422"]).anyOf;
+    expect(mismatch.properties.error.const).toBe("code_mismatch");
+    expect(mismatch.properties.attemptsLeft).toMatchObject({ type: "integer", minimum: 0 });
+    expect(mismatch.required).toEqual(["error", "attemptsLeft"]);
+    expect(mismatch.additionalProperties).toBe(false);
+    expect(invalid.properties.error.const).toBe("challenge_invalid");
   });
 
   it("components.securitySchemes 宣告 Better Auth session cookie 的 apiKey scheme", async () => {

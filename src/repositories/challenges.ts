@@ -1,5 +1,5 @@
 // admin_challenges（觸發驗證的驗證碼）的 DB 存取。規則（有效期、比對、次數）在 src/services/challenge.ts。
-import { and, desc, eq, gt, isNotNull, isNull, notExists } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { makeDb } from "../db/client";
 import { adminChallenges } from "../../db/schema";
@@ -87,4 +87,42 @@ export async function markChallengeUsed(
     )
     .run();
   return result.meta.changes === 1;
+}
+
+/**
+ * 該使用者、該 purpose 最近一次發出驗證碼的時間（不論後來已用、作廢或過期）;從未發過則 null。
+ * 重寄間隔的依據:只有寄信成功才會寫入,所以寄信失敗不占用重寄間隔。
+ * 以使用者（收件人）而非 session 計,換個 session 也不能灌爆同一個信箱。
+ */
+export async function latestChallengeCreatedAt(
+  db: D1Database,
+  { userId, purpose }: { userId: string; purpose: string },
+): Promise<string | null> {
+  const [row] = await makeDb(db)
+    .select({ createdAt: adminChallenges.createdAt })
+    .from(adminChallenges)
+    .where(and(eq(adminChallenges.userId, userId), eq(adminChallenges.purpose, purpose)))
+    .orderBy(desc(adminChallenges.createdAt))
+    .limit(1);
+  return row?.createdAt ?? null;
+}
+
+/**
+ * 記一次錯誤嘗試:attempts + 1,達 maxAttempts 即同時作廢（作廢時間 = now）。
+ * 同一個 UPDATE 以 DB 端的原值計算,並發的錯誤嘗試不會互相覆蓋,也不會多給機會。
+ * 只對仍未使用、未作廢的列生效;回傳累加後的次數,該列已被使用/作廢則 null。
+ */
+export async function recordFailedAttempt(
+  db: D1Database,
+  { id, maxAttempts, now }: { id: string; maxAttempts: number; now: string },
+): Promise<number | null> {
+  const [row] = await makeDb(db)
+    .update(adminChallenges)
+    .set({
+      attempts: sql`${adminChallenges.attempts} + 1`,
+      revokedAt: sql`CASE WHEN ${adminChallenges.attempts} + 1 >= ${maxAttempts} THEN ${now} ELSE NULL END`,
+    })
+    .where(and(eq(adminChallenges.id, id), isNull(adminChallenges.usedAt), isNull(adminChallenges.revokedAt)))
+    .returning({ attempts: adminChallenges.attempts });
+  return row?.attempts ?? null;
 }

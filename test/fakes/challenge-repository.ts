@@ -50,4 +50,22 @@ export const fakeChallengeRepository = {
     row.usedAt = now;
     return true;
   },
+
+  async latestChallengeCreatedAt(_db, { userId, purpose }) {
+    await tick();
+    const created = [...rows.values()]
+      .filter((r) => r.userId === userId && r.purpose === purpose)
+      .map((r) => r.createdAt)
+      .sort();
+    return created.at(-1) ?? null;
+  },
+
+  async recordFailedAttempt(_db, { id, maxAttempts, now }) {
+    await tick();
+    const row = rows.get(id);
+    if (!row || row.usedAt || row.revokedAt) return null;
+    row.attempts += 1;
+    if (row.attempts >= maxAttempts) row.revokedAt = now;
+    return row.attempts;
+  },
 } satisfies typeof Repo;

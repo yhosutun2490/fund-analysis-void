@@ -16,8 +16,23 @@ export const ChallengeSent = z.strictObject({
   resendAfter: z.iso.datetime(),
 });
 
+/** 距上次要求驗證碼未滿重寄間隔,沒有寄信:retryAfter 為還要等的秒數（同 Retry-After 標頭）。 */
+export const ResendTooSoon = z.strictObject({
+  error: z.literal("resend_too_soon"),
+  retryAfter: z.number().int().positive(),
+});
+
+/** 驗證碼信件寄送失敗:沒有產生可用的驗證碼,可立刻重新要求（不受重寄間隔限制）。 */
+export const ChallengeSendFailed = z.strictObject({ error: z.literal("email_send_failed") });
+
 /** 沒有有效的驗證碼:過期、已使用、已作廢、從未要求,或不是這個 session 要求的。 */
 export const ChallengeInvalid = z.strictObject({ error: z.literal("challenge_invalid") });
+
+/** 驗證碼不符:attemptsLeft 為剩餘可嘗試次數;0 表示這次錯滿、驗證碼已作廢,須重新要求。 */
+export const CodeMismatch = z.strictObject({
+  error: z.literal("code_mismatch"),
+  attemptsLeft: z.number().int().nonnegative(),
+});
 
 /** 觸發冷卻中（手動觸發開始後一段時間內）:retryAfter 為剩餘秒數,與 Retry-After 標頭相同。 */
 export const ChallengeCooldown = z
@@ -27,7 +42,7 @@ export const ChallengeCooldown = z
   })
   .meta({ description: "觸發冷卻中:手動觸發開始後 10 分鐘內（全域,不分管理員與 session）不能再要求驗證碼或觸發" });
 
-export const AdminIngestOk =z.strictObject({
+export const AdminIngestOk = z.strictObject({
   status: z.literal("ok"),
   dataTime: z.string(),
   dataCount: z.number().int().nonnegative(),
