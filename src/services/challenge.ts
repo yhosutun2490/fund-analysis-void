@@ -3,9 +3,15 @@
 import { sendEmail } from "void/email";
 import type { Env } from "../bindings";
 import { EMAIL_FROM } from "../lib/email";
-import { findActiveChallenge, findLatestRevokedChallenge, findLatestUse, markChallengeUsed, replaceActiveChallenge } from "../repositories/challenges";
-// 防濫用:重寄間隔、錯誤次數上限
-import { latestChallengeCreatedAt, recordFailedAttempt } from "../repositories/challenges";
+import {
+  findActiveChallenge,
+  findLatestRevokedChallenge,
+  findLatestUse,
+  latestChallengeCreatedAt,
+  markChallengeUsed,
+  recordFailedAttempt,
+  replaceActiveChallenge,
+} from "../repositories/challenges";
 
 /** 驗證碼保護的管理員動作。目前只有 ingest;資料表的 purpose 欄保留擴充。 */
 export type ChallengePurpose = "ingest";
