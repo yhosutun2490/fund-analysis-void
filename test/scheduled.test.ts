@@ -4,7 +4,7 @@ vi.mock("../src/services/ingest", () => ({
   runIngest: vi.fn().mockResolvedValue({ status: "ok" }),
 }));
 
-import { scheduled } from "../src/triggers/scheduled";
+import scheduled from "../crons/daily-ingest";
 import { runIngest } from "../src/services/ingest";
 
 const callScheduled = (ctx: ExecutionContext, env: object = {}) =>
