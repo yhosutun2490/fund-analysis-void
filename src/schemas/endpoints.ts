@@ -1,7 +1,8 @@
 // 端點契約登錄表:每個端點的摘要與請求/回應 schema。路由檔從這裡取 schema 驗證,
 // GET /openapi.json 從這裡產生文件,兩者同源。文件端點本身（GET /、GET /openapi.json）不登錄。
+import { z } from "zod";
 import type { Endpoint } from "../lib/openapi";
-import { AdminIngestError, AdminIngestOk } from "./admin";
+import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeInvalid, ChallengeSent } from "./admin";
 import {
   FundDetailResponse,
   FundHistoryResponse,
@@ -13,15 +14,31 @@ import {
 } from "./funds";
 import { CategoriesResponse, RunsResponse } from "./meta";
 import { ScreenQuery, ScreenResponse } from "./screen";
-import { ErrorResponse, ValidationErrorResponse } from "./shared";
+import { ErrorResponse, InvalidJsonBodyResponse, ValidationErrorResponse } from "./shared";
 
 export const endpoints = {
-  "POST /admin/ingest": {
-    summary: "手動觸發抓取（與 cron 同一流程）",
+  "POST /admin/ingest/challenge": {
+    summary: "要求手動觸發抓取的驗證碼（寄到登入管理員的 email）",
+    description: "驗證碼 6 位數字、有效 10 分鐘、只能用一次,綁定發出它的 session。重新要求時舊碼作廢。",
     tag: "admin",
     auth: "session",
     // 401/403 由 admin guard middleware 回應（不經 responds()）,列進契約是為了文件。
-    responses: { 200: AdminIngestOk, 401: ErrorResponse, 403: ErrorResponse, 500: AdminIngestError },
+    responses: { 202: ChallengeSent, 401: ErrorResponse, 403: ErrorResponse },
+  },
+  "POST /admin/ingest": {
+    summary: "帶驗證碼手動觸發抓取（與 cron 同一流程）",
+    description: "先以 POST /admin/ingest/challenge 要求驗證碼。驗證碼正確才執行抓取;驗證碼用過即失效。",
+    tag: "admin",
+    auth: "session",
+    body: AdminIngestBody,
+    responses: {
+      200: AdminIngestOk,
+      400: z.union([ValidationErrorResponse, InvalidJsonBodyResponse]),
+      401: ErrorResponse,
+      403: ErrorResponse,
+      422: ChallengeInvalid,
+      500: AdminIngestError,
+    },
   },
   "GET /api/funds": {
     summary: "基金清單 + 篩選 + 排序（以最新快照）",

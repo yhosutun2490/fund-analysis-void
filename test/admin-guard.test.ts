@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/services/ingest", () => ({ runIngest: vi.fn() }));
+// 這裡只看守門:驗證碼一律通過(驗證碼流程見 ingest-challenge.test.ts)
+vi.mock("../src/services/challenge", () => ({ consume: async () => ({ status: "ok" }) }));
 
 import { request, signedInAs } from "./entry";
 import { ErrorResponse } from "../src/schemas/shared";
 import { runIngest } from "../src/services/ingest";
 
-const ingest = { method: "POST" };
+const ingest = { method: "POST", body: JSON.stringify({ code: "123456" }) };
 const okRun = { status: "ok", dataTime: "2026-10-22", dataCount: 1, fetched: 1, upserted: 1, note: undefined } as const;
 
 describe("/admin/* 守門(全域 middleware)", () => {

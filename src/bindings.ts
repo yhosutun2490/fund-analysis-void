@@ -5,4 +5,8 @@ export interface Env {
   DISCORD_WEBHOOK_URL?: string;
   /** 管理員 email 允許清單(逗號分隔);以 secret 設定,未設定即沒有任何管理員。 */
   ADMIN_EMAILS?: string;
+  /** 觸發驗證碼有效秒數,預設 600。 */
+  CHALLENGE_TTL_SECONDS?: string;
+  /** 重新要求驗證碼的最短間隔秒數,預設 60。 */
+  CHALLENGE_RESEND_SECONDS?: string;
 }
