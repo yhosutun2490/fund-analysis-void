@@ -3,10 +3,17 @@ import { createEmailTestHarness, type EmailTestHarness } from "void/email/testin
 
 vi.mock("../src/services/ingest", () => ({ runIngest: vi.fn() }));
 vi.mock("../src/repositories/challenges", async () => (await import("./fakes/challenge-repository")).fakeChallengeRepository);
+// email harness 只能擷取、無法模擬寄信失敗:sendEmail 預設照常呼叫真的實作(信仍進 harness),
+// 只有寄信失敗的情境以 mockResolvedValueOnce 換掉一次。
+vi.mock("void/email", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("void/email")>();
+  return { ...actual, sendEmail: vi.fn(actual.sendEmail) };
+});
 
 import { request, signedInAs } from "./entry";
 import { resetFakeChallenges } from "./fakes/challenge-repository";
 import { runIngest } from "../src/services/ingest";
+import { sendEmail } from "void/email";
 import { ValidationErrorResponse } from "../src/schemas/shared";
 
 const ADMIN = "admin@example.com";
@@ -105,6 +112,24 @@ describe("POST /admin/ingest/challenge — 要求驗證碼", () => {
     expect(inbox.messages).toHaveLength(1);
   });
 
+  it.each([
+    ["寄送失敗", { ok: false, error: { code: "UPSTREAM_ERROR", message: "provider down" } }],
+    ["收件人被拒", { ok: false, deliveries: [{ recipient: ADMIN, ok: false, error: { code: "UNVERIFIED_DESTINATION", message: "x" } }] }],
+  ] as const)("%s → 502 email_send_failed,不留下可用的碼,立刻重新要求不受重寄間隔限制", async (_, failure) => {
+    vi.mocked(sendEmail).mockResolvedValueOnce(failure as Awaited<ReturnType<typeof sendEmail>>);
+    const failed = await requestChallenge();
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toEqual({ error: "email_send_failed" });
+
+    // 寄信失敗沒有寫入 challenge:任何碼都是 challenge_invalid
+    const res = await trigger({ code: "123456" });
+    expect(await res.json()).toEqual({ error: "challenge_invalid" });
+
+    const retry = await requestChallenge();
+    expect(retry.status).toBe(202);
+    expect(inbox.messages).toHaveLength(1);
+  });
+
   it("重寄間隔可用 CHALLENGE_RESEND_SECONDS 覆寫", async () => {
     const quick = { ...env, CHALLENGE_RESEND_SECONDS: "10" };
     const first = await request("/admin/ingest/challenge", { method: "POST" }, quick, signedInAs(ADMIN));
@@ -198,7 +223,7 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     ["7 位數", { code: "1234567" }],
     ["非數字", { code: "12a456" }],
     ["數字型別", { code: 123456 }],
-  ])("body %s → 400 ValidationErrorResponse,不執行抓取,碼仍可用", async (_, body) => {
+  ])("body %s → 400 ValidationErrorResponse,不執行抓取,不消耗嘗試次數,碼仍可用", async (_, body) => {
     await requestChallenge();
     const res = await trigger(body);
     expect(res.status).toBe(400);
@@ -208,6 +233,8 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     });
     expect(runIngest).not.toHaveBeenCalled();
 
+    // 400 之後第一次錯碼仍是 4 次機會
+    expect(await (await trigger({ code: wrongCode(latestCode()) })).json()).toEqual({ error: "code_mismatch", attemptsLeft: 4 });
     expect((await trigger({ code: latestCode() })).status).toBe(200);
   });
 

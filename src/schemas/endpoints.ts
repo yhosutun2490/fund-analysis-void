@@ -3,7 +3,7 @@
 import { z } from "zod";
 import type { Endpoint } from "../lib/openapi";
 import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeInvalid, ChallengeSent } from "./admin";
-import { CodeMismatch, ResendTooSoon } from "./admin";
+import { ChallengeSendFailed, CodeMismatch, ResendTooSoon } from "./admin";
 import {
   FundDetailResponse,
   FundHistoryResponse,
@@ -29,6 +29,7 @@ export const endpoints = {
       401: ErrorResponse,
       403: ErrorResponse,
       429: ResendTooSoon,
+      502: ChallengeSendFailed,
     },
   },
   "POST /admin/ingest": {

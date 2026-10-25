@@ -16,6 +16,10 @@ export const POST = responds(
     if (sent.status === "resend_too_soon") {
       return c.json({ error: sent.status, retryAfter: sent.retryAfter }, 429, { "Retry-After": String(sent.retryAfter) });
     }
+    if (sent.status === "send_failed") {
+      console.error("challenge email send failed", sent.reason);
+      return c.json({ error: "email_send_failed" }, 502);
+    }
     return c.json(
       { status: sent.status, expiresAt: sent.expiresAt.toISOString(), resendAfter: sent.resendAfter.toISOString() },
       202,

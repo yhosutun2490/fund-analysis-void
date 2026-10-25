@@ -22,6 +22,9 @@ export const ResendTooSoon = z.strictObject({
   retryAfter: z.number().int().positive(),
 });
 
+/** 驗證碼信件寄送失敗:沒有產生可用的驗證碼,可立刻重新要求（不受重寄間隔限制）。 */
+export const ChallengeSendFailed = z.strictObject({ error: z.literal("email_send_failed") });
+
 /** 沒有有效的驗證碼:過期、已使用、已作廢、從未要求,或不是這個 session 要求的。 */
 export const ChallengeInvalid = z.strictObject({ error: z.literal("challenge_invalid") });
 

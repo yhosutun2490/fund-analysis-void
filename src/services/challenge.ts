@@ -22,7 +22,9 @@ export interface ChallengeSession {
 export type IssueResult =
   | { status: "sent"; expiresAt: Date; resendAfter: Date }
   /** 距上次發碼未滿重寄間隔;retryAfter 為還要等的秒數（無條件進位）。 */
-  | { status: "resend_too_soon"; retryAfter: number };
+  | { status: "resend_too_soon"; retryAfter: number }
+  /** 寄信失敗,沒有寫入驗證碼;reason 為供應商錯誤代碼,只供記錄。 */
+  | { status: "send_failed"; reason: string };
 export type ConsumeResult =
   | { status: "ok" }
   | { status: "invalid" }
@@ -91,7 +93,7 @@ function challengeMail(purpose: ChallengePurpose, code: string, expiresAt: Date)
 
 /**
  * 發一組新驗證碼寄給 session 使用者:重寄間隔 → 產生驗證碼 → 寄信 → 寄信成功才寫入（同時作廢同 session 的舊碼）。
- * 寄信失敗不留下可用的碼。
+ * 寄信失敗不留下可用的碼,也不占用重寄間隔。
  */
 export async function issue(
   env: Env,
@@ -116,7 +118,7 @@ export async function issue(
   const sent = await sendEmail({ from: EMAIL_FROM, to: user.email, ...challengeMail(purpose, code, expiresAt) });
   if (!sent.ok) {
     const reason = "error" in sent ? sent.error.code : sent.deliveries.map((d) => (d.ok ? "ok" : d.error.code)).join(",");
-    throw new Error(`驗證碼信件寄送失敗: ${reason}`);
+    return { status: "send_failed", reason };
   }
 
   await replaceActiveChallenge(env.DB, {
