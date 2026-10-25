@@ -1,8 +1,6 @@
-import { testClient } from "hono/testing";
 import { describe, expect, it } from "vitest";
-import { app } from "../src/app";
-
-const client = testClient(app);
+import { request } from "./entry";
+import { ValidationErrorResponse } from "../src/schemas/shared";
 
 // 空結果 D1:讓通過驗證的請求能跑到底(不連真 DB)。
 // drizzle-d1 的 all() 底層走 raw(),故 stub 需自我回傳並提供 raw/all/run/first。
@@ -17,81 +15,81 @@ const emptyDB = { prepare: () => stmt, batch: async () => [] } as unknown as D1D
 const env = { DB: emptyDB };
 
 describe("worker http surface", () => {
-  it("GET / 回服務資訊(型別化回傳)", async () => {
-    const res = await client.index.$get();
+  it("GET / 回服務資訊", async () => {
+    const res = await request("/");
     expect(res.status).toBe(200);
-    const body = await res.json();
-    // body.name / body.endpoints / body.disclaimer 皆由 c.json(...) 推導出型別
+    const body = (await res.json()) as any;
+    // 完整形狀由 test/responses.test.ts 以 RootResponse 檢查
     expect(body.name).toBe("fund-risks-analysis");
     expect(Array.isArray(body.endpoints)).toBe(true);
     expect(body.disclaimer).toBeTruthy();
   });
 
   it("GET /api/screen 缺 category/area/group 全無 回 400", async () => {
-    const res = await app.request("/api/screen");
+    const res = await request("/api/screen");
     expect(res.status).toBe(400);
   });
 
   it("GET /api/screen 只給 area 也可(不回 400)", async () => {
-    const res = await app.request("/api/screen?area=亞洲", {}, env);
+    const res = await request("/api/screen?area=亞洲", {}, env);
     expect(res.status).toBe(200);
   });
 
   it("GET /api/screen maxRr 超出 1–5 回 400", async () => {
-    const res = await app.request("/api/screen?category=台灣股票&maxRr=9");
+    const res = await request("/api/screen?category=台灣股票&maxRr=9");
     expect(res.status).toBe(400);
   });
 
   it("GET /api/screen minSharpePct 超出 0–100 回 400", async () => {
-    const res = await app.request("/api/screen?category=台灣股票&minSharpePct=200");
+    const res = await request("/api/screen?category=台灣股票&minSharpePct=200");
     expect(res.status).toBe(400);
   });
 
   it("GET /api/screen minWins 超出 0–5 回 400", async () => {
-    const res = await app.request("/api/screen?category=台灣股票&minWins=9");
+    const res = await request("/api/screen?category=台灣股票&minWins=9");
     expect(res.status).toBe(400);
   });
 
   it("GET /api/screen weakWindows 含非法窗口回 400", async () => {
-    const res = await app.request("/api/screen?category=台灣股票&weakWindows=6m,2y");
+    const res = await request("/api/screen?category=台灣股票&weakWindows=6m,2y");
     expect(res.status).toBe(400);
   });
 
   it("GET /api/screen weakPct 超出 0–100 回 400", async () => {
-    const res = await app.request("/api/screen?category=台灣股票&weakPct=150");
+    const res = await request("/api/screen?category=台灣股票&weakPct=150");
     expect(res.status).toBe(400);
   });
 
   it("舊的 /api/analyze 已移除(404)", async () => {
-    const res = await app.request("/api/analyze?category=台灣股票");
+    const res = await request("/api/analyze?category=台灣股票");
     expect(res.status).toBe(404);
   });
 
   it("未知路徑回 404", async () => {
-    const res = await app.request("/does-not-exist");
+    const res = await request("/does-not-exist");
     expect(res.status).toBe(404);
   });
 
   it("/api/* 帶 CORS 標頭", async () => {
-    const res = await app.request("/api/screen", {
+    const res = await request("/api/screen", {
       headers: { Origin: "http://example.com" },
     });
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
 });
 
-// 400 + 一致的 { error } 形狀,訊息點名參數與有效範圍
+// 400 + Void 的標準形狀;issues 裡要有一則訊息同時點名參數與有效範圍
 async function expect400(path: string, ...mentions: string[]) {
-  const res = await app.request(path, {}, env);
+  const res = await request(path, {}, env);
   expect(res.status).toBe(400);
-  const body = (await res.json()) as Record<string, unknown>;
-  expect(Object.keys(body)).toEqual(["error"]);
-  expect(typeof body.error).toBe("string");
-  for (const m of mentions) expect(body.error).toContain(m);
+  const body = ValidationErrorResponse.parse(await res.json());
+  const messages = body.issues.flatMap((slot) => slot.issues.map((i) => i.message));
+  const hit = messages.find((msg) => mentions.every((m) => msg.includes(m)));
+  expect(hit, `issues: ${messages.join(" | ")}`).toBeDefined();
 }
 
 async function ok(path: string) {
-  const res = await app.request(path, {}, env);
+  const res = await request(path, {}, env);
   expect(res.status).toBe(200);
   return (await res.json()) as any;
 }
@@ -169,7 +167,7 @@ describe("GET /api/funds — 請求驗證", () => {
   it("空值參數(GET / 端點範本的 minSharpe3y=&maxStd1y=&order=)視同未給", async () => {
     const queries: unknown[][] = [];
     const db = { prepare: (sql: string) => ({ ...stmt, bind: (...args: unknown[]) => (queries.push([sql, ...args]), stmt) }), batch: async () => [] };
-    const res = await app.request("/api/funds?group=&minSharpe3y=&maxStd1y=&order=", {}, { DB: db as unknown as D1Database });
+    const res = await request("/api/funds?group=&minSharpe3y=&maxStd1y=&order=", {}, { DB: db as unknown as D1Database });
     expect(res.status).toBe(200);
     const [sql] = queries[0] as [string];
     expect(sql).not.toContain("sharpe_3y\" >=");

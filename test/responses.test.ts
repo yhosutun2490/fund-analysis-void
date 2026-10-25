@@ -13,23 +13,25 @@ vi.mock("../src/repositories/ingest", () => ({ listRuns: vi.fn() }));
 vi.mock("../src/services/ingest", () => ({ runIngest: vi.fn() }));
 vi.mock("../src/services/recovery", async (orig) => ({ ...(await orig()), loadSeries: vi.fn() }));
 
-import { app } from "../src/app";
+import { request } from "./entry";
 import { DISCLAIMER } from "../src/disclaimer";
 import {
   getFund, getLatestRisk, getRiskHistory, listCategories, listFullGroups, listFunds, listMatchedKeys,
 } from "../src/repositories/funds";
 import { listRuns } from "../src/repositories/ingest";
-import {
-  AdminIngestError, AdminIngestOk, CategoriesResponse, ErrorResponse, FundDetailResponse, FundHistoryResponse,
-  FundListResponse, RecoveryResponse, RootResponse, RunsResponse, ScreenResponse,
-} from "../src/responses";
+import { AdminIngestError, AdminIngestOk } from "../src/schemas/admin";
+import { FundDetailResponse, FundHistoryResponse, FundListResponse, RecoveryResponse } from "../src/schemas/funds";
+import { CategoriesResponse, RunsResponse } from "../src/schemas/meta";
+import { RootResponse } from "../src/schemas/root";
+import { ScreenResponse } from "../src/schemas/screen";
+import { ErrorResponse, ValidationErrorResponse } from "../src/schemas/shared";
 import type { SeriesPoint } from "../src/recovery";
 import type { ScreenRow } from "../src/screen";
 import { runIngest } from "../src/services/ingest";
 import { loadSeries } from "../src/services/recovery";
 
 const env = { DB: {} as D1Database };
-const get = (path: string) => app.request(path, {}, env);
+const get = (path: string) => request(path, {}, env);
 
 // 與 D1 經 drizzle 取回的形狀一致(snake_case 別名;nullable 欄可為 null)
 const fundRow = {
@@ -150,19 +152,20 @@ describe("成功回應符合各路由的 response schema", () => {
     vi.mocked(runIngest)
       .mockResolvedValueOnce({ status: "ok", dataTime: "2026-10-22", dataCount: 1, fetched: 1, upserted: 1, note: undefined })
       .mockRejectedValueOnce(new Error("Anue HTTP 500"));
-    const ok = await app.request("/admin/ingest", { method: "POST" }, env);
+    const ok = await request("/admin/ingest", { method: "POST" }, env);
     expect(ok.status).toBe(200);
     AdminIngestOk.parse(await ok.json());
-    const err = await app.request("/admin/ingest", { method: "POST" }, env);
+    const err = await request("/admin/ingest", { method: "POST" }, env);
     expect(err.status).toBe(500);
     expect(AdminIngestError.parse(await err.json()).message).toBe("Anue HTTP 500");
   });
 
-  it("請求錯誤一律為 { error } 形狀", async () => {
+  it("請求驗證錯誤(400)為 Void 標準形狀;404 仍為 { error }", async () => {
     vi.mocked(getFund).mockResolvedValue(null as never);
-    for (const path of ["/api/screen", "/api/funds?limit=abc", "/api/funds/NOPE"]) {
-      ErrorResponse.parse(await (await get(path)).json());
+    for (const path of ["/api/screen", "/api/funds?limit=abc"]) {
+      ValidationErrorResponse.parse(await (await get(path)).json());
     }
+    ErrorResponse.parse(await (await get("/api/funds/NOPE")).json());
   });
 });
 
@@ -189,6 +192,37 @@ describe("回應違反自身 schema", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { fund: { fundName: string } }).fund.fundName).toBe("renamed");
     expect(log.mock.calls.flat().join(" ")).toMatch(/response schema.*\/api\/funds\/:id/);
+    log.mockRestore();
+  });
+
+  // 原生路由檔以 defineHandler(responds(...), handler) 組合,同樣要擋得住漂移
+  const driftedRun = { id: 1, started_at: "t0", finished_at: "t1", data_time: null, total_count: 0, upserted: 0, status: "ok", note: null, extra: 1 };
+
+  it("非正式環境:GET /api/meta/runs 回應漂移 → 500", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(listRuns).mockResolvedValue([driftedRun] as never);
+    const res = await get("/api/meta/runs");
+    expect(res.status).toBe(500);
+    log.mockRestore();
+  });
+
+  it("正式環境:GET /api/meta/runs 回應漂移 → 照常回傳,記錄路由", async () => {
+    vi.stubEnv("PROD", true);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(listRuns).mockResolvedValue([driftedRun] as never);
+    const res = await get("/api/meta/runs");
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { runs: { extra: number }[] }).runs[0].extra).toBe(1);
+    expect(log.mock.calls.flat().join(" ")).toMatch(/response schema mismatch GET \/api\/meta\/runs 200/);
+    log.mockRestore();
+  });
+
+  it("非正式環境:POST /admin/ingest 成功 payload 漂移 → 500(非 handler 自己的錯誤 JSON)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(runIngest).mockResolvedValue({ status: "ok" } as never); // 缺 dataTime 等欄位
+    const res = await request("/admin/ingest", { method: "POST" }, env);
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type") ?? "").not.toContain("application/json");
     log.mockRestore();
   });
 });

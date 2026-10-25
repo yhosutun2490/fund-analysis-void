@@ -1,6 +1,6 @@
 import { defineConfig } from "void/config";
 
-// 排程改由 crons/ 底下的檔案宣告;路由經 routes/ 轉接到 src/app.ts。
+// 排程由 crons/ 底下的檔案宣告;路由由 routes/ 的檔案定義(一個 URL 一個檔);全域 middleware 在 middleware/。
 export default defineConfig({
   cloudflare: {
     name: "fund-risks-analysis",

@@ -15,7 +15,7 @@ vi.mock("../src/repositories/funds", () => ({
   getLatestRisk: vi.fn().mockResolvedValue({ nav_date: "2026-10-09" }),
 }));
 
-import { app } from "../src/app";
+import { request } from "./entry";
 import { recordRun } from "../src/repositories/ingest";
 import { getFund } from "../src/repositories/funds";
 import { getSeries } from "../src/repositories/series";
@@ -69,7 +69,7 @@ describe("recovery:鉅亨格式不符不被當成一般 stale 降級", () => {
 
   it("快取尚在 → 200 回快取,warning 指出上游格式變動", async () => {
     vi.mocked(getSeries).mockResolvedValue(cache as never);
-    const res = await app.request("/api/funds/B1/recovery", {}, env);
+    const res = await request("/api/funds/B1/recovery", {}, env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { series: { stale: boolean }; warning: string };
     expect(body.series.stale).toBe(true);
@@ -78,7 +78,7 @@ describe("recovery:鉅亨格式不符不被當成一般 stale 降級", () => {
 
   it("無快取 → 502,訊息標明格式問題", async () => {
     vi.mocked(getSeries).mockResolvedValue(null as never);
-    const res = await app.request("/api/funds/B1/recovery", {}, env);
+    const res = await request("/api/funds/B1/recovery", {}, env);
     expect(res.status).toBe(502);
     expect(((await res.json()) as { error: string }).error).toMatch(/格式變動.*FundDetail\/Price 回應格式不符/);
   });
