@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { request, routeEndpoints } from "./entry";
+import { toOpenAPI } from "../src/lib/openapi";
 import { DISCLAIMER } from "../src/schemas/shared";
 import pkg from "../package.json";
 
@@ -11,11 +13,18 @@ async function openapi() {
     openapi: string;
     info: { title: string; version: string; description: string };
     paths: Record<string, Record<string, Operation>>;
+    components: { securitySchemes: Record<string, Record<string, string>> };
   };
 }
 
 type Parameter = { name: string; in: "path" | "query"; required: boolean; schema: Record<string, any>; description?: string };
-type Operation = { description?: string; parameters?: Parameter[]; responses: Record<string, JsonResponse> };
+type Operation = {
+  description?: string;
+  requestBody?: { required: boolean; content: Record<string, { schema: Record<string, any> }> };
+  parameters?: Parameter[];
+  security?: Record<string, string[]>[];
+  responses: Record<string, JsonResponse>;
+};
 const param = (op: Operation, name: string) => op.parameters?.find((p) => p.name === name);
 
 type JsonResponse = { content: { "application/json": { schema: Record<string, any> } } };
@@ -61,12 +70,98 @@ describe("GET /openapi.json", () => {
 
   it("回應依狀態碼列出 JSON schema:literal → const,strictObject → additionalProperties false", async () => {
     const { responses } = (await openapi()).paths["/admin/ingest"].post;
-    expect(Object.keys(responses)).toEqual(["200", "500"]);
     const ok = schemaOf(responses["200"]);
     expect(ok.properties.status).toEqual({ type: "string", const: "ok" });
     expect(ok.additionalProperties).toBe(false);
     expect(ok.required).toEqual(["status", "dataTime", "dataCount", "fetched", "upserted"]);
     expect(schemaOf(responses["500"]).properties.status.const).toBe("error");
+  });
+
+  it.each(["/admin/ingest", "/admin/ingest/challenge"])(
+    "POST %s 需要登入:security 引用 session cookie scheme,401/403 回 { error }",
+    async (path) => {
+      const op = (await openapi()).paths[path].post;
+      expect(op.security).toEqual([{ sessionCookie: [] }]);
+      for (const status of ["401", "403"]) {
+        const schema = schemaOf(op.responses[status]);
+        expect(schema.required).toEqual(["error"]);
+        expect(schema.additionalProperties).toBe(false);
+      }
+    },
+  );
+
+  it("POST /admin/ingest/challenge:沒有 requestBody,202 回 { status: sent, expiresAt, resendAfter }", async () => {
+    const op = (await openapi()).paths["/admin/ingest/challenge"].post;
+    expect(op).not.toHaveProperty("requestBody");
+    expect(Object.keys(op.responses)).toEqual(["202", "401", "403", "429", "502"]);
+    const sent = schemaOf(op.responses["202"]);
+    expect(sent.properties.status.const).toBe("sent");
+    expect(sent.properties.expiresAt).toMatchObject({ type: "string", format: "date-time" });
+    expect(sent.properties.resendAfter).toMatchObject({ type: "string", format: "date-time" });
+    expect(sent.required).toEqual(["status", "expiresAt", "resendAfter"]);
+    expect(sent.additionalProperties).toBe(false);
+  });
+
+  it.each([
+    ["/admin/ingest", ["cooldown"]],
+    ["/admin/ingest/challenge", ["cooldown", "resend_too_soon"]],
+  ])("POST %s:429 回 { error: %j 之一, retryAfter }", async (path, errors) => {
+    const schema = schemaOf((await openapi()).paths[path].post.responses["429"]);
+    const variants: Record<string, any>[] = schema.anyOf ?? [schema];
+    expect(variants.map((v) => v.properties.error.const)).toEqual(errors);
+    for (const v of variants) {
+      expect(v.properties.retryAfter).toMatchObject({ type: "integer", exclusiveMinimum: 0 });
+      expect(v.required).toEqual(["error", "retryAfter"]);
+      expect(v.additionalProperties).toBe(false);
+    }
+  });
+
+  it("POST /admin/ingest/challenge:502 寄信失敗回 { error: email_send_failed }", async () => {
+    const { responses } = (await openapi()).paths["/admin/ingest/challenge"].post;
+    const failed = schemaOf(responses["502"]);
+    expect(failed.properties.error.const).toBe("email_send_failed");
+    expect(failed.required).toEqual(["error"]);
+    expect(failed.additionalProperties).toBe(false);
+  });
+
+  it("POST /admin/ingest:requestBody 為 6 位數 code;列出 200/400/401/403/422/429/500", async () => {
+    const op = (await openapi()).paths["/admin/ingest"].post;
+    expect(op.requestBody!.required).toBe(true);
+    const body = op.requestBody!.content["application/json"].schema;
+    expect(body.required).toEqual(["code"]);
+    expect(body.properties.code).toMatchObject({ type: "string", pattern: "^\\d{6}$" });
+
+    expect(Object.keys(op.responses)).toEqual(["200", "400", "401", "403", "422", "429", "500"]);
+    // 400:欄位驗證失敗,或 body 不是 JSON
+    const bad = schemaOf(op.responses["400"]).anyOf.map((s: Record<string, any>) => s.properties.error.const);
+    expect(bad).toEqual(["Validation failed", "Invalid JSON body"]);
+    // 422:碼不符(帶剩餘次數),或沒有有效的驗證碼
+    const [mismatch, invalid] = schemaOf(op.responses["422"]).anyOf;
+    expect(mismatch.properties.error.const).toBe("code_mismatch");
+    expect(mismatch.properties.attemptsLeft).toMatchObject({ type: "integer", minimum: 0 });
+    expect(mismatch.required).toEqual(["error", "attemptsLeft"]);
+    expect(mismatch.additionalProperties).toBe(false);
+    expect(invalid.properties.error.const).toBe("challenge_invalid");
+  });
+
+  it("components.securitySchemes 宣告 Better Auth session cookie 的 apiKey scheme", async () => {
+    const { components } = await openapi();
+    expect(components.securitySchemes.sessionCookie).toMatchObject({
+      type: "apiKey",
+      in: "cookie",
+      name: "better-auth.session_token",
+    });
+  });
+
+  it("公開端點沒有 security,文件也沒有全域 security", async () => {
+    const doc = await openapi();
+    expect(doc).not.toHaveProperty("security");
+    const secured = Object.entries(doc.paths).flatMap(([path, ops]) =>
+      Object.entries(ops)
+        .filter(([, op]) => op.security)
+        .map(([m]) => `${m.toUpperCase()} ${path}`),
+    );
+    expect(secured).toEqual(["POST /admin/ingest/challenge", "POST /admin/ingest"]);
   });
 
   it("動態段寫成 {id};recovery 列出 200/400/404/502,disclaimer 為 const", async () => {
@@ -140,5 +235,38 @@ describe("GET /openapi.json", () => {
     expect(param(op, "minSharpePct")!.schema).toMatchObject({ type: "number", minimum: 0, maximum: 100, default: 50 });
     expect(param(op, "maxRr")).toMatchObject({ required: false, schema: { type: "number", minimum: 1, maximum: 5 } });
     expect(param(op, "limit")!.schema).toMatchObject({ minimum: 1, maximum: 500, default: 100 });
+  });
+});
+
+// 產生器本身:以測試用登錄項目驗證 request body 的轉換規則（input 形狀、transform 退化）。
+describe("toOpenAPI", () => {
+  const ok = z.strictObject({ status: z.literal("ok") });
+  type WithBody = { requestBody: { required: boolean; content: Record<string, { schema: Record<string, any> }> } };
+
+  it("有 body 的登錄項目輸出 requestBody:application/json、必填,以 input 形狀轉換", () => {
+    const doc = toOpenAPI({
+      "POST /test/body": {
+        summary: "測試用",
+        tag: "test",
+        body: z.strictObject({
+          code: z.string().regex(/^\d{6}$/).describe("6 位數驗證碼"),
+          count: z.string().transform(Number).optional(),
+        }),
+        responses: { 200: ok },
+      },
+    });
+    const { requestBody } = doc.paths["/test/body"].post as WithBody;
+    expect(requestBody.required).toBe(true);
+    expect(Object.keys(requestBody.content)).toEqual(["application/json"]);
+    const schema = requestBody.content["application/json"].schema;
+    expect(schema.$schema).toBeUndefined();
+    expect(schema).toMatchObject({ type: "object", required: ["code"], additionalProperties: false });
+    expect(schema.properties.code).toMatchObject({ type: "string", pattern: "^\\d{6}$", description: "6 位數驗證碼" });
+    expect(schema.properties.count).toEqual({ type: "string" });
+  });
+
+  it("沒有 body 的登錄項目不輸出 requestBody", () => {
+    const doc = toOpenAPI({ "GET /test/plain": { summary: "測試用", tag: "test", responses: { 200: ok } } });
+    expect(doc.paths["/test/plain"].get).not.toHaveProperty("requestBody");
   });
 });

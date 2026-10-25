@@ -107,3 +107,29 @@ export const ingestRuns = sqliteTable("ingest_runs", {
   status: text("status"), // ok / error
   note: text("note"),
 });
+
+/**
+ * 管理員動作的 email 驗證碼（觸發驗證）。每次要求驗證碼一列;`purpose` 目前只有 `ingest`,保留給其他 admin 動作。
+ * 綁定發碼的 session;只存 `SHA-256(id + ":" + code)`,不存明文。
+ * 「目前有效」= 同 session、同 purpose 最新一筆未作廢、未使用、未過期、錯誤次數未達上限者。
+ * `revoked_at`:被新碼取代（或錯誤次數用盡）的時刻;`used_at`:驗證成功、動作開始的時刻（觸發冷卻的依據）。
+ */
+export const adminChallenges = sqliteTable(
+  "admin_challenges",
+  {
+    id: text("id").primaryKey(), // crypto.randomUUID()
+    purpose: text("purpose").notNull(), // ingest
+    userId: text("user_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    codeHash: text("code_hash").notNull(), // hex(SHA-256(id + ":" + code))
+    createdAt: text("created_at").notNull(), // ISO
+    expiresAt: text("expires_at").notNull(), // ISO
+    revokedAt: text("revoked_at"),
+    usedAt: text("used_at"),
+    attempts: integer("attempts").notNull().default(0), // 錯誤嘗試次數
+  },
+  (t) => [
+    index("idx_challenges_session").on(t.sessionId, t.purpose),
+    index("idx_challenges_used").on(t.purpose, t.usedAt),
+  ],
+);

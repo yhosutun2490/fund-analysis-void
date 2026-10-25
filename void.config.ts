@@ -1,7 +1,11 @@
 import { defineConfig } from "void/config";
+// 帶 .ts 副檔名:void CLI 以 Node 原生 import 載入本檔,不會補副檔名
+import { EMAIL_FROM } from "./src/lib/email.ts";
 
 // 排程由 crons/ 底下的檔案宣告;路由由 routes/ 的檔案定義(一個 URL 一個檔);全域 middleware 在 middleware/。
 export default defineConfig({
+  // 驗證碼信件的寄件者（直接部署到自有 Cloudflare 帳號時必填）。目前是佔位值,見 src/lib/email.ts。
+  email: { from: EMAIL_FROM },
   cloudflare: {
     name: "fund-risks-analysis",
     compatibility_date: "2024-12-18",
