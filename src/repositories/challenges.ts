@@ -56,6 +56,24 @@ export async function markChallengeUsed(db: D1Database, { id, now }: { id: strin
 }
 
 /**
+ * 該使用者、該 purpose 最近一次發出驗證碼的時間（不論後來已用、作廢或過期）;從未發過則 null。
+ * 重寄間隔的依據:只有寄信成功才會寫入,所以寄信失敗不占用重寄間隔。
+ * 以使用者（收件人）而非 session 計,換個 session 也不能灌爆同一個信箱。
+ */
+export async function latestChallengeCreatedAt(
+  db: D1Database,
+  { userId, purpose }: { userId: string; purpose: string },
+): Promise<string | null> {
+  const [row] = await makeDb(db)
+    .select({ createdAt: adminChallenges.createdAt })
+    .from(adminChallenges)
+    .where(and(eq(adminChallenges.userId, userId), eq(adminChallenges.purpose, purpose)))
+    .orderBy(desc(adminChallenges.createdAt))
+    .limit(1);
+  return row?.createdAt ?? null;
+}
+
+/**
  * 記一次錯誤嘗試:attempts + 1,達 maxAttempts 即同時作廢（作廢時間 = now）。
  * 同一個 UPDATE 以 DB 端的原值計算,並發的錯誤嘗試不會互相覆蓋,也不會多給機會。
  * 只對仍未使用、未作廢的列生效;回傳累加後的次數,該列已被使用/作廢則 null。

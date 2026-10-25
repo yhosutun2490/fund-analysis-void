@@ -2,7 +2,8 @@
 // GET /openapi.json 從這裡產生文件,兩者同源。文件端點本身（GET /、GET /openapi.json）不登錄。
 import { z } from "zod";
 import type { Endpoint } from "../lib/openapi";
-import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeInvalid, ChallengeSent, CodeMismatch } from "./admin";
+import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeInvalid, ChallengeSent } from "./admin";
+import { CodeMismatch, ResendTooSoon } from "./admin";
 import {
   FundDetailResponse,
   FundHistoryResponse,
@@ -19,11 +20,16 @@ import { ErrorResponse, InvalidJsonBodyResponse, ValidationErrorResponse } from 
 export const endpoints = {
   "POST /admin/ingest/challenge": {
     summary: "要求手動觸發抓取的驗證碼（寄到登入管理員的 email）",
-    description: "驗證碼 6 位數字、有效 10 分鐘、只能用一次,綁定發出它的 session。重新要求時舊碼作廢。",
+    description: "驗證碼 6 位數字、有效 10 分鐘、只能用一次,綁定發出它的 session。重新要求時舊碼作廢。同一管理員 60 秒內只能要求一次（429 resend_too_soon）。",
     tag: "admin",
     auth: "session",
     // 401/403 由 admin guard middleware 回應（不經 responds()）,列進契約是為了文件。
-    responses: { 202: ChallengeSent, 401: ErrorResponse, 403: ErrorResponse },
+    responses: {
+      202: ChallengeSent,
+      401: ErrorResponse,
+      403: ErrorResponse,
+      429: ResendTooSoon,
+    },
   },
   "POST /admin/ingest": {
     summary: "帶驗證碼手動觸發抓取（與 cron 同一流程）",

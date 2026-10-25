@@ -3,7 +3,9 @@
 import { sendEmail } from "void/email";
 import type { Env } from "../bindings";
 import { EMAIL_FROM } from "../lib/email";
-import { findActiveChallenge, markChallengeUsed, recordFailedAttempt, replaceActiveChallenge } from "../repositories/challenges";
+import { findActiveChallenge, markChallengeUsed, replaceActiveChallenge } from "../repositories/challenges";
+// 防濫用:重寄間隔、錯誤次數上限
+import { latestChallengeCreatedAt, recordFailedAttempt } from "../repositories/challenges";
 
 /** 驗證碼保護的管理員動作。目前只有 ingest;資料表的 purpose 欄保留擴充。 */
 export type ChallengePurpose = "ingest";
@@ -17,7 +19,10 @@ export interface ChallengeSession {
   id: string;
 }
 
-export type IssueResult = { status: "sent"; expiresAt: Date; resendAfter: Date };
+export type IssueResult =
+  | { status: "sent"; expiresAt: Date; resendAfter: Date }
+  /** 距上次發碼未滿重寄間隔;retryAfter 為還要等的秒數（無條件進位）。 */
+  | { status: "resend_too_soon"; retryAfter: number };
 export type ConsumeResult =
   | { status: "ok" }
   | { status: "invalid" }
@@ -85,7 +90,7 @@ function challengeMail(purpose: ChallengePurpose, code: string, expiresAt: Date)
 }
 
 /**
- * 發一組新驗證碼寄給 session 使用者:產生驗證碼 → 寄信 → 寄信成功才寫入（同時作廢同 session 的舊碼）。
+ * 發一組新驗證碼寄給 session 使用者:重寄間隔 → 產生驗證碼 → 寄信 → 寄信成功才寫入（同時作廢同 session 的舊碼）。
  * 寄信失敗不留下可用的碼。
  */
 export async function issue(
@@ -96,6 +101,13 @@ export async function issue(
 ): Promise<IssueResult> {
   const now = new Date();
   const { ttlMs, resendMs } = settings(env);
+
+  // 重寄間隔:以使用者計,距上次成功發碼未滿 resendMs 就不寄信
+  const lastCreatedAt = await latestChallengeCreatedAt(env.DB, { userId: user.id, purpose });
+  if (lastCreatedAt) {
+    const waitMs = Date.parse(lastCreatedAt) + resendMs - now.getTime();
+    if (waitMs > 0) return { status: "resend_too_soon", retryAfter: Math.ceil(waitMs / 1000) };
+  }
 
   const id = crypto.randomUUID();
   const code = generateCode();

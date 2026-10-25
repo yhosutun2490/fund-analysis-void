@@ -79,6 +79,40 @@ describe("POST /admin/ingest/challenge — 要求驗證碼", () => {
     expect(text).toContain("若非本人操作，請立即更改密碼");
     expect(text).not.toMatch(/https?:|www\.|\/\//i);
   });
+
+  it("60 秒內再要求 → 429 resend_too_soon + Retry-After,不寄信;60 秒後可再要求", async () => {
+    await requestChallenge();
+
+    vi.setSystemTime(new Date("2026-10-25T00:00:30.200Z"));
+    const tooSoon = await requestChallenge();
+    expect(tooSoon.status).toBe(429);
+    // 剩 29.8 秒 → 無條件進位成 30
+    expect(tooSoon.headers.get("Retry-After")).toBe("30");
+    expect(await tooSoon.json()).toEqual({ error: "resend_too_soon", retryAfter: 30 });
+    expect(inbox.messages).toHaveLength(1);
+
+    vi.setSystemTime(new Date("2026-10-25T00:01:00Z"));
+    expect((await requestChallenge()).status).toBe(202);
+    expect(inbox.messages).toHaveLength(2);
+  });
+
+  it("重寄間隔以收件人(使用者)計:同帳號的別的 session 60 秒內要求也被擋", async () => {
+    await requestChallenge();
+    vi.setSystemTime(new Date("2026-10-25T00:00:10Z"));
+    const res = await requestChallenge(otherSession());
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "resend_too_soon", retryAfter: 50 });
+    expect(inbox.messages).toHaveLength(1);
+  });
+
+  it("重寄間隔可用 CHALLENGE_RESEND_SECONDS 覆寫", async () => {
+    const quick = { ...env, CHALLENGE_RESEND_SECONDS: "10" };
+    const first = await request("/admin/ingest/challenge", { method: "POST" }, quick, signedInAs(ADMIN));
+    expect(await first.json()).toMatchObject({ resendAfter: "2026-10-25T00:00:10.000Z" });
+
+    vi.setSystemTime(new Date("2026-10-25T00:00:10Z"));
+    expect((await request("/admin/ingest/challenge", { method: "POST" }, quick, signedInAs(ADMIN))).status).toBe(202);
+  });
 });
 
 describe("POST /admin/ingest — 帶驗證碼觸發", () => {

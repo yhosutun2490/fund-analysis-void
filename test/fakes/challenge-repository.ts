@@ -41,6 +41,15 @@ export const fakeChallengeRepository = {
     return true;
   },
 
+  async latestChallengeCreatedAt(_db, { userId, purpose }) {
+    await tick();
+    const created = [...rows.values()]
+      .filter((r) => r.userId === userId && r.purpose === purpose)
+      .map((r) => r.createdAt)
+      .sort();
+    return created.at(-1) ?? null;
+  },
+
   async recordFailedAttempt(_db, { id, maxAttempts, now }) {
     await tick();
     const row = rows.get(id);

@@ -16,6 +16,12 @@ export const ChallengeSent = z.strictObject({
   resendAfter: z.iso.datetime(),
 });
 
+/** 距上次要求驗證碼未滿重寄間隔,沒有寄信:retryAfter 為還要等的秒數（同 Retry-After 標頭）。 */
+export const ResendTooSoon = z.strictObject({
+  error: z.literal("resend_too_soon"),
+  retryAfter: z.number().int().positive(),
+});
+
 /** 沒有有效的驗證碼:過期、已使用、已作廢、從未要求,或不是這個 session 要求的。 */
 export const ChallengeInvalid = z.strictObject({ error: z.literal("challenge_invalid") });
 

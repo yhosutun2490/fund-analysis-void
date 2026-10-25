@@ -93,13 +93,22 @@ describe("GET /openapi.json", () => {
   it("POST /admin/ingest/challenge:沒有 requestBody,202 回 { status: sent, expiresAt, resendAfter }", async () => {
     const op = (await openapi()).paths["/admin/ingest/challenge"].post;
     expect(op).not.toHaveProperty("requestBody");
-    expect(Object.keys(op.responses)).toEqual(["202", "401", "403"]);
+    expect(Object.keys(op.responses)).toEqual(["202", "401", "403", "429"]);
     const sent = schemaOf(op.responses["202"]);
     expect(sent.properties.status.const).toBe("sent");
     expect(sent.properties.expiresAt).toMatchObject({ type: "string", format: "date-time" });
     expect(sent.properties.resendAfter).toMatchObject({ type: "string", format: "date-time" });
     expect(sent.required).toEqual(["status", "expiresAt", "resendAfter"]);
     expect(sent.additionalProperties).toBe(false);
+  });
+
+  it("POST /admin/ingest/challenge:429 resend_too_soon 帶 retryAfter 秒數", async () => {
+    const { responses } = (await openapi()).paths["/admin/ingest/challenge"].post;
+    const tooSoon = schemaOf(responses["429"]);
+    expect(tooSoon.properties.error.const).toBe("resend_too_soon");
+    expect(tooSoon.properties.retryAfter).toMatchObject({ type: "integer", exclusiveMinimum: 0 });
+    expect(tooSoon.required).toEqual(["error", "retryAfter"]);
+    expect(tooSoon.additionalProperties).toBe(false);
   });
 
   it("POST /admin/ingest:requestBody 為 6 位數 code;列出 200/400/401/403/422/500", async () => {
