@@ -15,16 +15,6 @@ const emptyDB = { prepare: () => stmt, batch: async () => [] } as unknown as D1D
 const env = { DB: emptyDB };
 
 describe("worker http surface", () => {
-  it("GET / 回服務資訊", async () => {
-    const res = await request("/");
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
-    // 完整形狀由 test/responses.test.ts 以 RootResponse 檢查
-    expect(body.name).toBe("fund-risks-analysis");
-    expect(Array.isArray(body.endpoints)).toBe(true);
-    expect(body.disclaimer).toBeTruthy();
-  });
-
   it("GET /api/screen 缺 category/area/group 全無 回 400", async () => {
     const res = await request("/api/screen");
     expect(res.status).toBe(400);

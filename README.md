@@ -25,6 +25,7 @@ POST /admin/ingest ─┴─▶ fetchAllFunds() ─▶ normalize(哨兵值→nul
 - `src/domain/screen.ts`：快照初篩純計算（同組百分位、年度勝率、入選規則；描述性，非建議）
 - `src/anue/price.ts`：鉅亨含息序列抓取（切塊、併發、串接）；`src/domain/recovery.ts`：回撤／近期報酬純計算
 - `src/services/recovery.ts`：序列快取新鮮度 → 抓取／存檔 → 計算；`src/repositories/series.ts`：`fund_series` 讀寫
+- `src/schemas/endpoints.ts`：端點契約登錄表（每個端點的摘要與請求/回應 schema）;路由檔從這裡取 schema 驗證,`src/lib/openapi.ts` 從這裡產生 OpenAPI 文件
 - `routes/`：Void 檔案路由，一個 URL 一個檔（每個 HTTP 方法一個具名 export）；`middleware/01.cors.ts`：`/api/*` 的 CORS
 - `crons/daily-ingest.ts`：每日 cron 排程（與 `/admin/ingest` 共用 `runIngest`;失敗或帶 warning 時通知 Discord）
 - `db/migrations/`：`drizzle-kit generate` 產生的 migration（由 schema.ts 衍生,勿手改）
@@ -56,11 +57,13 @@ npm run deploy
 
 ### 驗證
 
-- **請求**：各路由檔以 `defineHandler.withValidator()` 套 `src/schemas/*` 的 query/param schema，不合法 → `400 { error: "Validation failed", issues: [{ slot, issues: [{ message, path }] }] }`（`message` 為 zh-TW 用語）。
-- **回應**：各路由成功回應由 `responds()`（`src/lib/validation.ts`）對 `src/schemas/*` 的 schema 驗證（DB 列由 Drizzle 衍生）。`vite dev` / 測試中不符即 500（大聲失敗）;正式建置（`import.meta.env.PROD`）只記 log、照常回傳。
+- **請求**：各路由檔從端點契約登錄表取 query/param schema,以 `defineHandler.withValidator()` 驗證，不合法 → `400 { error: "Validation failed", issues: [{ slot, issues: [{ message, path }] }] }`（`message` 為 zh-TW 用語）。
+- **回應**：各路由回應由 `responds()`（`src/lib/validation.ts`）依狀態碼對登錄表的回應 schema 驗證（DB 列由 Drizzle 衍生）。`vite dev` / 測試中不符即 500（大聲失敗）;正式建置（`import.meta.env.PROD`）只記 log、照常回傳。
 - **上游鉅亨**：回應以 zod 驗證。破壞性變動 → 抓取失敗、`ingest_runs` 記 `status:error`;多出未知欄位 → 記 warning（`src/anue/knownKeys.ts` 為已知欄位快照,確認無害後補進清單即可）。
 
 ## 端點
+
+`GET /` 是 Swagger UI,可直接瀏覽與試打;`GET /openapi.json` 是 OpenAPI 3.1 文件,由端點契約登錄表產生,參數型別、範圍、預設值與回應形狀以它為準。下表為摘要。
 
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |

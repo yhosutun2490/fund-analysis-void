@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { request } from "./entry";
+import { request, routeEndpoints } from "./entry";
 import { DISCLAIMER } from "../src/schemas/shared";
 import pkg from "../package.json";
 
@@ -21,7 +21,29 @@ const param = (op: Operation, name: string) => op.parameters?.find((p) => p.name
 type JsonResponse = { content: { "application/json": { schema: Record<string, any> } } };
 const schemaOf = (r: JsonResponse) => r.content["application/json"].schema;
 
+describe("GET /", () => {
+  it("是載入 /openapi.json 的 Swagger UI 頁面", async () => {
+    const res = await request("/");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("swagger-ui-dist@");
+    expect(html).toContain('url: "/openapi.json"');
+  });
+});
+
 describe("GET /openapi.json", () => {
+  it("文件列的端點與 routes/ 的路由檔(方法 + 路徑)一一對應,文件端點本身除外", async () => {
+    const { paths } = await openapi();
+    const documented = Object.entries(paths)
+      .flatMap(([path, ops]) => Object.keys(ops).map((m) => `${m.toUpperCase()} ${path.replace(/\{(\w+)\}/g, ":$1")}`))
+      .sort();
+    const files = routeEndpoints(import.meta.glob("../routes/**/*.ts", { eager: true }))
+      .filter((e) => e !== "GET /" && e !== "GET /openapi.json")
+      .sort();
+    expect(documented).toEqual(files);
+  });
+
   it("是 OpenAPI 3.1 文件,列出 meta 端點", async () => {
     const doc = await openapi();
     expect(doc.openapi).toBe("3.1.0");

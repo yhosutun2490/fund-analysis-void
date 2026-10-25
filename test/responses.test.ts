@@ -21,7 +21,6 @@ import { listRuns } from "../src/repositories/ingest";
 import { AdminIngestError, AdminIngestOk } from "../src/schemas/admin";
 import { FundDetailResponse, FundHistoryResponse, FundListResponse, RecoveryResponse } from "../src/schemas/funds";
 import { CategoriesResponse, RunsResponse } from "../src/schemas/meta";
-import { RootResponse } from "../src/schemas/root";
 import { ScreenResponse } from "../src/schemas/screen";
 import { DISCLAIMER, ErrorResponse, ValidationErrorResponse } from "../src/schemas/shared";
 import type { SeriesPoint } from "../src/domain/recovery";
@@ -77,12 +76,6 @@ const loaded = (points: SeriesPoint[], extra = {}) => ({
 beforeEach(() => vi.clearAllMocks());
 
 describe("成功回應符合各路由的 response schema", () => {
-  it("GET /", async () => {
-    const res = await get("/");
-    expect(res.status).toBe(200);
-    RootResponse.parse(await res.json());
-  });
-
   it("GET /api/funds(含 disclaimer)", async () => {
     vi.mocked(listFunds).mockResolvedValue([listRow] as never);
     const res = await get("/api/funds");
