@@ -19,7 +19,9 @@ export const endpoints = {
   "POST /admin/ingest": {
     summary: "手動觸發抓取（與 cron 同一流程）",
     tag: "admin",
-    responses: { 200: AdminIngestOk, 500: AdminIngestError },
+    auth: "session",
+    // 401/403 由 admin guard middleware 回應（不經 responds()）,列進契約是為了文件。
+    responses: { 200: AdminIngestOk, 401: ErrorResponse, 403: ErrorResponse, 500: AdminIngestError },
   },
   "GET /api/funds": {
     summary: "基金清單 + 篩選 + 排序（以最新快照）",
