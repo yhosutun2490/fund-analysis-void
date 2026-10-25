@@ -13,11 +13,17 @@ async function openapi() {
     openapi: string;
     info: { title: string; version: string; description: string };
     paths: Record<string, Record<string, Operation>>;
+    components: { securitySchemes: Record<string, Record<string, string>> };
   };
 }
 
 type Parameter = { name: string; in: "path" | "query"; required: boolean; schema: Record<string, any>; description?: string };
-type Operation = { description?: string; parameters?: Parameter[]; responses: Record<string, JsonResponse> };
+type Operation = {
+  description?: string;
+  parameters?: Parameter[];
+  security?: Record<string, string[]>[];
+  responses: Record<string, JsonResponse>;
+};
 const param = (op: Operation, name: string) => op.parameters?.find((p) => p.name === name);
 
 type JsonResponse = { content: { "application/json": { schema: Record<string, any> } } };
@@ -63,12 +69,42 @@ describe("GET /openapi.json", () => {
 
   it("回應依狀態碼列出 JSON schema:literal → const,strictObject → additionalProperties false", async () => {
     const { responses } = (await openapi()).paths["/admin/ingest"].post;
-    expect(Object.keys(responses)).toEqual(["200", "500"]);
+    expect(Object.keys(responses)).toEqual(["200", "401", "403", "500"]);
     const ok = schemaOf(responses["200"]);
     expect(ok.properties.status).toEqual({ type: "string", const: "ok" });
     expect(ok.additionalProperties).toBe(false);
     expect(ok.required).toEqual(["status", "dataTime", "dataCount", "fetched", "upserted"]);
     expect(schemaOf(responses["500"]).properties.status.const).toBe("error");
+  });
+
+  it("POST /admin/ingest 需要登入:security 引用 session cookie scheme,401/403 回 { error }", async () => {
+    const op = (await openapi()).paths["/admin/ingest"].post;
+    expect(op.security).toEqual([{ sessionCookie: [] }]);
+    for (const status of ["401", "403"]) {
+      const schema = schemaOf(op.responses[status]);
+      expect(schema.required).toEqual(["error"]);
+      expect(schema.additionalProperties).toBe(false);
+    }
+  });
+
+  it("components.securitySchemes 宣告 Better Auth session cookie 的 apiKey scheme", async () => {
+    const { components } = await openapi();
+    expect(components.securitySchemes.sessionCookie).toMatchObject({
+      type: "apiKey",
+      in: "cookie",
+      name: "better-auth.session_token",
+    });
+  });
+
+  it("公開端點沒有 security,文件也沒有全域 security", async () => {
+    const doc = await openapi();
+    expect(doc).not.toHaveProperty("security");
+    const secured = Object.entries(doc.paths).flatMap(([path, ops]) =>
+      Object.entries(ops)
+        .filter(([, op]) => op.security)
+        .map(([m]) => `${m.toUpperCase()} ${path}`),
+    );
+    expect(secured).toEqual(["POST /admin/ingest"]);
   });
 
   it("動態段寫成 {id};recovery 列出 200/400/404/502,disclaimer 為 const", async () => {

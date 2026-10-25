@@ -13,8 +13,23 @@ export interface Endpoint {
   query?: z.ZodObject;
   /** JSON request body;有給才輸出 requestBody（必填）。 */
   body?: z.ZodObject;
+  /** 需要登入:"session" = 帶 Better Auth 的 session cookie。未設定即公開端點。 */
+  auth?: "session";
   responses: Partial<Record<number, z.ZodType>>;
 }
+
+/** auth 標記 → OpenAPI security scheme 名稱（components.securitySchemes 的 key）。 */
+const securitySchemeName = { session: "sessionCookie" } as const;
+
+/** Better Auth 的 session cookie（https 下帶 __Secure- 前綴）;登入後由 /api/auth/* 發出。 */
+const securitySchemes = {
+  sessionCookie: {
+    type: "apiKey",
+    in: "cookie",
+    name: "better-auth.session_token",
+    description: "以 POST /api/auth/sign-in/email 登入後取得的 HttpOnly session cookie（https 下名稱為 __Secure-better-auth.session_token）。",
+  },
+};
 
 /**
  * 請求 schema → OpenAPI parameters。以 input 形狀轉換（使用者實際送的,如逗號分隔字串）;
@@ -59,6 +74,7 @@ export function toOpenAPI(endpoints: Record<string, Endpoint>) {
       tags: [ep.tag],
       parameters: [...parameters("path", ep.params), ...parameters("query", ep.query)],
       ...(ep.body && { requestBody: requestBody(ep.body) }),
+      security: ep.auth && [{ [securitySchemeName[ep.auth]]: [] }],
       responses: Object.fromEntries(Object.entries(ep.responses).map(([status, schema]) => [status, jsonResponse(status, schema!)])),
     };
   }
@@ -70,5 +86,6 @@ export function toOpenAPI(endpoints: Record<string, Endpoint>) {
       description: `自用/內部基金風險分析工具（private/internal tool）,資料來源為鉅亨買基金。\n\n${DISCLAIMER}`,
     },
     paths,
+    components: { securitySchemes },
   };
 }
