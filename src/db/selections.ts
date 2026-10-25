@@ -3,7 +3,7 @@
 import { type Column, getTableColumns, type Table } from "drizzle-orm";
 import { createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
-import { fundRisk, funds, ingestRuns } from "./schema";
+import { fundRisk, funds, ingestRuns } from "../../db/schema";
 
 // ── rowOf：select 子句 → schema ─────────────────────────────────
 // 為什麼不直接用 drizzle-zod 的 createSelectSchema(table)?它描述的是「資料表的一列」（SELECT *）,

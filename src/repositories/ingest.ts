@@ -2,7 +2,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { desc, eq } from "drizzle-orm";
 import type { FundRecord } from "../anue/search";
 import { makeDb } from "../db/client";
-import { fundRisk, funds, ingestRuns } from "../db/schema";
+import { fundRisk, funds, ingestRuns } from "../../db/schema";
 import { runCols } from "../db/selections";
 
 /** 把一批正規化記錄寫入 D1。funds 覆蓋更新;fund_risk 以 (fund_id, as_of) upsert 累積月歷史。 */
