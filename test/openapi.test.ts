@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { request, routeEndpoints } from "./entry";
+import { toOpenAPI } from "../src/lib/openapi";
 import { DISCLAIMER } from "../src/schemas/shared";
 import pkg from "../package.json";
 
@@ -140,5 +142,38 @@ describe("GET /openapi.json", () => {
     expect(param(op, "minSharpePct")!.schema).toMatchObject({ type: "number", minimum: 0, maximum: 100, default: 50 });
     expect(param(op, "maxRr")).toMatchObject({ required: false, schema: { type: "number", minimum: 1, maximum: 5 } });
     expect(param(op, "limit")!.schema).toMatchObject({ minimum: 1, maximum: 500, default: 100 });
+  });
+});
+
+// 產生器本身:以測試用登錄項目驗證登錄表能描述 request body（現有端點都沒有 body）。
+describe("toOpenAPI", () => {
+  const ok = z.strictObject({ status: z.literal("ok") });
+  type WithBody = { requestBody: { required: boolean; content: Record<string, { schema: Record<string, any> }> } };
+
+  it("有 body 的登錄項目輸出 requestBody:application/json、必填,以 input 形狀轉換", () => {
+    const doc = toOpenAPI({
+      "POST /test/body": {
+        summary: "測試用",
+        tag: "test",
+        body: z.strictObject({
+          code: z.string().regex(/^\d{6}$/).describe("6 位數驗證碼"),
+          count: z.string().transform(Number).optional(),
+        }),
+        responses: { 200: ok },
+      },
+    });
+    const { requestBody } = doc.paths["/test/body"].post as WithBody;
+    expect(requestBody.required).toBe(true);
+    expect(Object.keys(requestBody.content)).toEqual(["application/json"]);
+    const schema = requestBody.content["application/json"].schema;
+    expect(schema.$schema).toBeUndefined();
+    expect(schema).toMatchObject({ type: "object", required: ["code"], additionalProperties: false });
+    expect(schema.properties.code).toMatchObject({ type: "string", pattern: "^\\d{6}$", description: "6 位數驗證碼" });
+    expect(schema.properties.count).toEqual({ type: "string" });
+  });
+
+  it("沒有 body 的登錄項目不輸出 requestBody", () => {
+    const doc = toOpenAPI({ "GET /test/plain": { summary: "測試用", tag: "test", responses: { 200: ok } } });
+    expect(doc.paths["/test/plain"].get).not.toHaveProperty("requestBody");
   });
 });
