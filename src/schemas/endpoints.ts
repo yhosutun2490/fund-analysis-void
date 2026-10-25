@@ -12,6 +12,7 @@ import {
   RecoveryResponse,
 } from "./funds";
 import { CategoriesResponse, RunsResponse } from "./meta";
+import { ScreenQuery, ScreenResponse } from "./screen";
 import { ErrorResponse, ValidationErrorResponse } from "./shared";
 
 export const endpoints = {
@@ -45,6 +46,13 @@ export const endpoints = {
     params: FundIdParam,
     query: RecoveryQuery,
     responses: { 200: RecoveryResponse, 400: ValidationErrorResponse, 404: ErrorResponse, 502: ErrorResponse },
+  },
+  "GET /api/screen": {
+    summary: "快照初篩:範圍篩選決定回傳哪些基金,百分位永遠以完整 (category, currency) 組計算",
+    description: "category / area / group 至少擇一（決定篩選範圍）。同組 = 同 category + 同 currency。",
+    tag: "screen",
+    query: ScreenQuery,
+    responses: { 200: ScreenResponse, 400: ValidationErrorResponse },
   },
   "GET /api/meta/categories": {
     summary: "各類別/類型的基金數",

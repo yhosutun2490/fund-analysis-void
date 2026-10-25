@@ -95,4 +95,28 @@ describe("GET /openapi.json", () => {
     expect(param(recovery, "refresh")!.schema.description).toBeTruthy();
     expect(param(recovery, "from")!.schema.examples).toEqual(["2020-01-01"]);
   });
+
+  it("/api/screen 列出 200/400,basis 與 disclaimer 為 const", async () => {
+    const { responses } = (await openapi()).paths["/api/screen"].get;
+    expect(Object.keys(responses)).toEqual(["200", "400"]);
+    expect(schemaOf(responses["200"]).properties.basis.const).toBe("anue_year_fields_unverified");
+    expect(schemaOf(responses["200"]).properties.disclaimer.const).toBe(DISCLAIMER);
+  });
+
+  it("/api/screen 參數以使用者實際送的形狀呈現:逗號分隔字串、數值範圍與預設值", async () => {
+    const op = (await openapi()).paths["/api/screen"].get;
+    expect(op.description).toContain("category / area / group 至少擇一");
+
+    const category = param(op, "category")!;
+    expect(category).toMatchObject({ required: false, schema: { type: "string", examples: ["台灣股票"] } });
+    expect(category.schema.description).toContain("逗號分隔");
+
+    const weakWindows = param(op, "weakWindows")!;
+    expect(weakWindows).toMatchObject({ required: false, schema: { type: "string", default: "6m,1y" } });
+    expect(weakWindows.schema.description).toContain("3m/6m/1y");
+
+    expect(param(op, "minSharpePct")!.schema).toMatchObject({ type: "number", minimum: 0, maximum: 100, default: 50 });
+    expect(param(op, "maxRr")).toMatchObject({ required: false, schema: { type: "number", minimum: 1, maximum: 5 } });
+    expect(param(op, "limit")!.schema).toMatchObject({ minimum: 1, maximum: 500, default: 100 });
+  });
 });
