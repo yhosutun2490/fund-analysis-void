@@ -11,43 +11,67 @@ import { disclaimer } from "./shared";
 const blankAsMissing = <S extends z.ZodType>(schema: S) => z.preprocess((v) => (v === "" ? undefined : v), schema);
 
 /** GET /api/funds 的 query。limit 超過 500 夾到 500;空值參數視同未給;未知 sort 由 repository 回退 sharpe_3y。 */
+// .meta() 的 description/examples 只進 OpenAPI 文件（GET /openapi.json）,不影響驗證。
 export const FundListQuery = z.object({
-  group: z.string().optional(),
-  category: z.string().optional(),
-  currency: z.string().optional(),
-  rr: z.string().optional(),
-  domicile: z.string().optional(),
-  minSharpe3y: blankAsMissing(z.coerce.number({ error: "minSharpe3y 須為數值" }).optional()),
-  maxStd1y: blankAsMissing(z.coerce.number({ error: "maxStd1y 須為數值" }).optional()),
-  sort: z.string().optional(),
+  group: z.string().optional().meta({ description: "基金類型（完全比對）", examples: ["股票型"] }),
+  category: z.string().optional().meta({ description: "基金類別（完全比對）", examples: ["台灣股票"] }),
+  currency: z.string().optional().meta({ description: "計價幣別", examples: ["TWD"] }),
+  rr: z.string().optional().meta({ description: "風險等級 RR1–RR5", examples: ["RR3"] }),
+  domicile: z.string().optional().meta({ description: "onshore（境內）/ offshore（境外）", examples: ["offshore"] }),
+  minSharpe3y: blankAsMissing(z.coerce.number({ error: "minSharpe3y 須為數值" }).optional()).meta({
+    description: "3 年 Sharpe 下限（含）;空值視同未給",
+  }),
+  maxStd1y: blankAsMissing(z.coerce.number({ error: "maxStd1y 須為數值" }).optional()).meta({
+    description: "1 年標準差上限（含）;空值視同未給",
+  }),
+  sort: z.string().optional().meta({
+    description: "排序欄位:sharpe_3y、sharpe_1y、std_1y、ret_3y、ret_1y、aum_twd;未知值回退 sharpe_3y",
+    examples: ["sharpe_3y"],
+  }),
   order: blankAsMissing(
     z
       .string()
       .toLowerCase()
       .pipe(z.enum(["asc", "desc"], { error: "order 僅允許 asc/desc" }))
       .default("desc"),
-  ),
+  ).meta({ enum: ["asc", "desc"], description: "排序方向（不分大小寫）" }),
   limit: z.coerce
     .number({ error: "limit 須為非負整數" })
     .int()
     .min(0)
     .default(50)
-    .transform((n) => Math.min(n, 500)),
-  offset: z.coerce.number({ error: "offset 須為非負整數" }).int().min(0).default(0),
+    .transform((n) => Math.min(n, 500))
+    .meta({ description: "回傳筆數;超過 500 夾到 500" }),
+  offset: z.coerce.number({ error: "offset 須為非負整數" }).int().min(0).default(0).meta({ description: "略過筆數（分頁）" }),
 });
 
 /** /api/funds/:id 系列的路徑參數。 */
-export const FundIdParam = z.object({ id: z.string().min(1) });
+export const FundIdParam = z.object({ id: z.string().min(1).meta({ description: "基金代碼（fund_id）" }) });
 
 /** GET /api/funds/:id/recovery 的 query。 */
 export const RecoveryQuery = z
   .object({
-    from: z.string({ error: "from 須為 YYYY-MM-DD" }).regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    to: z.string({ error: "to 須為 YYYY-MM-DD" }).regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    minDepth: z.coerce.number({ error: "minDepth 須在 (0,100)" }).gt(0).lt(100).default(10),
+    from: z
+      .string({ error: "from 須為 YYYY-MM-DD" })
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional()
+      .meta({ description: "分析窗口起日（YYYY-MM-DD）;未給從序列起點", examples: ["2020-01-01"] }),
+    to: z
+      .string({ error: "to 須為 YYYY-MM-DD" })
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional()
+      .meta({ description: "分析窗口迄日（YYYY-MM-DD）;未給到序列終點", examples: ["2024-12-31"] }),
+    minDepth: z.coerce
+      .number({ error: "minDepth 須在 (0,100)" })
+      .gt(0)
+      .lt(100)
+      .default(10)
+      .meta({ description: "回撤事件的最小深度（%）" }),
     refresh: z
       .string()
       .optional()
+      // meta 放在 transform 前（input 端）:放在後面時 toJSONSchema 會丟掉 examples
+      .meta({ description: "\"true\" 時略過快取,整條重抓上游序列", examples: ["false"] })
       .transform((v) => v === "true"),
   })
   .refine((q) => !(q.from && q.to && q.from > q.to), { error: "from 不可晚於 to" });
