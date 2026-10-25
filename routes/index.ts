@@ -1,6 +1,6 @@
 // GET /:服務自我描述。endpoints 清單手寫,不從 route map 產生。
 import { defineHandler } from "void";
-import { DISCLAIMER } from "../src/disclaimer";
+import { DISCLAIMER } from "../src/schemas/shared";
 import { RootResponse } from "../src/schemas/root";
 import { responds } from "../src/lib/validation";
 

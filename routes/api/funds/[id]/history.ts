@@ -1,9 +1,8 @@
 // GET /api/funds/:id/history:單檔風險歷史（cron 累積出來的月序列）。
 import { defineHandler } from "void";
-import { DISCLAIMER } from "../../../../src/disclaimer";
 import { getRiskHistory } from "../../../../src/repositories/funds";
 import { FundHistoryResponse, FundIdParam } from "../../../../src/schemas/funds";
-import { ValidationErrorResponse } from "../../../../src/schemas/shared";
+import { DISCLAIMER, ValidationErrorResponse } from "../../../../src/schemas/shared";
 import { responds } from "../../../../src/lib/validation";
 
 export const GET = responds(
