@@ -3,7 +3,7 @@
 import { sendEmail } from "void/email";
 import type { Env } from "../bindings";
 import { EMAIL_FROM } from "../lib/email";
-import { findActiveChallenge, markChallengeUsed, replaceActiveChallenge } from "../repositories/challenges";
+import { findActiveChallenge, findLatestUse, markChallengeUsed, replaceActiveChallenge } from "../repositories/challenges";
 // 防濫用:重寄間隔、錯誤次數上限
 import { latestChallengeCreatedAt, recordFailedAttempt } from "../repositories/challenges";
 
@@ -19,8 +19,11 @@ export interface ChallengeSession {
   id: string;
 }
 
+/** 觸發冷卻中:retryAfter 為剩餘秒數。 */
+export type Cooldown = { status: "cooldown"; retryAfter: number };
 export type IssueResult =
   | { status: "sent"; expiresAt: Date; resendAfter: Date }
+  | Cooldown
   /** 距上次發碼未滿重寄間隔;retryAfter 為還要等的秒數（無條件進位）。 */
   | { status: "resend_too_soon"; retryAfter: number }
   /** 寄信失敗,沒有寫入驗證碼;reason 為供應商錯誤代碼,只供記錄。 */
@@ -28,6 +31,7 @@ export type IssueResult =
 export type ConsumeResult =
   | { status: "ok" }
   | { status: "invalid" }
+  | Cooldown
   /** 碼不符;attemptsLeft 為 0 表示這次錯滿、驗證碼已作廢。 */
   | { status: "mismatch"; attemptsLeft: number };
 
@@ -51,9 +55,22 @@ function settings(env: Env) {
     ttlMs: seconds(env.CHALLENGE_TTL_SECONDS, 600),
     /** 重寄間隔（回應的 resendAfter） */
     resendMs: seconds(env.CHALLENGE_RESEND_SECONDS, 60),
+    /** 觸發冷卻:最近一次使用驗證碼後多久內不能再要求或觸發 */
+    cooldownMs: seconds(env.CHALLENGE_COOLDOWN_SECONDS, 600),
     /** 最多錯誤嘗試次數,錯滿即作廢 */
     maxAttempts: positiveInt(env.CHALLENGE_MAX_ATTEMPTS, 5),
   };
+}
+
+/**
+ * 觸發冷卻:同 purpose 最近一次使用驗證碼（= 手動觸發開始）後 cooldownMs 內,回傳剩餘秒數（無條件進位）;
+ * 不在冷卻中則 null。全域生效,不分使用者與 session;cron 不經驗證碼,不算進冷卻。
+ */
+async function cooldownRemaining(env: Env, purpose: ChallengePurpose, now: Date): Promise<number | null> {
+  const latest = await findLatestUse(env.DB, { purpose });
+  if (!latest) return null;
+  const remainingMs = new Date(latest.usedAt).getTime() + settings(env).cooldownMs - now.getTime();
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
 }
 
 /** 均勻分布的 6 位數字（含前導 0）:拒絕取樣,避免 2^32 mod 10^6 造成的偏差。 */
@@ -92,8 +109,8 @@ function challengeMail(purpose: ChallengePurpose, code: string, expiresAt: Date)
 }
 
 /**
- * 發一組新驗證碼寄給 session 使用者:重寄間隔 → 產生驗證碼 → 寄信 → 寄信成功才寫入（同時作廢同 session 的舊碼）。
- * 寄信失敗不留下可用的碼,也不占用重寄間隔。
+ * 發一組新驗證碼寄給 session 使用者:觸發冷卻 → 重寄間隔 → 產生驗證碼 → 寄信 → 寄信成功才寫入（同時作廢同 session 的舊碼）。
+ * 冷卻中 → cooldown、未滿重寄間隔 → resend_too_soon,都不寄信。寄信失敗不留下可用的碼,也不占用重寄間隔。
  */
 export async function issue(
   env: Env,
@@ -103,6 +120,10 @@ export async function issue(
 ): Promise<IssueResult> {
   const now = new Date();
   const { ttlMs, resendMs } = settings(env);
+
+  // 觸發冷卻:冷卻中不寄一封註定用不到的信
+  const cooldown = await cooldownRemaining(env, purpose, now);
+  if (cooldown !== null) return { status: "cooldown", retryAfter: cooldown };
 
   // 重寄間隔:以使用者計,距上次成功發碼未滿 resendMs 就不寄信
   const lastCreatedAt = await latestChallengeCreatedAt(env.DB, { userId: user.id, purpose });
@@ -134,9 +155,11 @@ export async function issue(
 }
 
 /**
- * 以驗證碼換取一次動作許可。檢查順序:目前有效的驗證碼 → 比對雜湊 → 條件式標記已使用。
- * 沒有有效的碼（過期、已用、已作廢、從未要求、別的 session 發的）或碼不符 → invalid;
- * 標記已使用時被並發請求搶先 → invalid。只有 ok 才可以執行動作。
+ * 以驗證碼換取一次動作許可。檢查順序:觸發冷卻 → 目前有效的驗證碼 → 比對雜湊 → 條件式標記已使用（含冷卻條件）。
+ * 冷卻中 → cooldown（不比對、不消耗碼）;
+ * 沒有有效的碼（過期、已用、已作廢、錯滿、從未要求、別的 session 發的）→ invalid;
+ * 碼不符 → 累加嘗試次數（錯滿即作廢）→ mismatch;
+ * 標記已使用時被並發請求搶先 → 同一組碼 invalid,別組碼搶先開始冷卻 → cooldown。只有 ok 才可以執行動作。
  */
 export async function consume(
   env: Env,
@@ -145,6 +168,10 @@ export async function consume(
   code: string,
 ): Promise<ConsumeResult> {
   const now = new Date().toISOString();
+
+  // 觸發冷卻:先於驗證碼檢查,冷卻中不比對、不消耗碼（冷卻開始前就要的有效碼也一樣）
+  const cooldown = await cooldownRemaining(env, purpose, new Date(now));
+  if (cooldown !== null) return { status: "cooldown", retryAfter: cooldown };
 
   const challenge = await findActiveChallenge(env.DB, { sessionId: session.id, purpose, now });
   if (!challenge) return { status: "invalid" };
@@ -157,6 +184,15 @@ export async function consume(
     return { status: "mismatch", attemptsLeft: Math.max(0, maxAttempts - attempts) };
   }
 
-  const marked = await markChallengeUsed(env.DB, { id: challenge.id, now });
-  return marked ? { status: "ok" } : { status: "invalid" };
+  const cooldownSince = new Date(Date.parse(now) - settings(env).cooldownMs).toISOString();
+  const marked = await markChallengeUsed(env.DB, { id: challenge.id, now, cooldownSince });
+  if (marked) return { status: "ok" };
+
+  // 標記失敗:這組碼被並發請求搶先使用 → invalid;別組碼搶先開始觸發 → cooldown（這組碼不被消耗）
+  const latest = await findLatestUse(env.DB, { purpose });
+  if (latest && latest.id !== challenge.id) {
+    const retryAfter = await cooldownRemaining(env, purpose, new Date(now));
+    if (retryAfter !== null) return { status: "cooldown", retryAfter };
+  }
+  return { status: "invalid" };
 }

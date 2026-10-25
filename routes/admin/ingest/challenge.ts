@@ -13,6 +13,9 @@ export const POST = responds(
     if (!user || !session) return c.json({ error: "unauthorized" }, 401);
 
     const sent = await issue(c.env, user, session, "ingest");
+    if (sent.status === "cooldown") {
+      return c.json({ error: "cooldown", retryAfter: sent.retryAfter }, 429, { "Retry-After": String(sent.retryAfter) });
+    }
     if (sent.status === "resend_too_soon") {
       return c.json({ error: sent.status, retryAfter: sent.retryAfter }, 429, { "Retry-After": String(sent.retryAfter) });
     }

@@ -14,10 +14,12 @@ import { request, signedInAs } from "./entry";
 import { resetFakeChallenges } from "./fakes/challenge-repository";
 import { runIngest } from "../src/services/ingest";
 import { sendEmail } from "void/email";
+import scheduled from "../crons/daily-ingest";
 import { ValidationErrorResponse } from "../src/schemas/shared";
 
 const ADMIN = "admin@example.com";
-const env = { DB: {} as D1Database, ADMIN_EMAILS: ADMIN };
+const OTHER_ADMIN = "other-admin@example.com";
+const env = { DB: {} as D1Database, ADMIN_EMAILS: `${ADMIN},${OTHER_ADMIN}` };
 
 let inbox: EmailTestHarness;
 
@@ -35,14 +37,14 @@ afterEach(() => {
 
 const okRun = { status: "ok", dataTime: "2026-10-22", dataCount: 1, fetched: 1, upserted: 1, note: undefined } as const;
 
-const requestChallenge = (auth = signedInAs(ADMIN)) =>
-  request("/admin/ingest/challenge", { method: "POST" }, env, auth);
+const requestChallenge = (auth = signedInAs(ADMIN), e: object = env) =>
+  request("/admin/ingest/challenge", { method: "POST" }, e, auth);
 
-const trigger = (body: unknown, auth = signedInAs(ADMIN)) =>
+const trigger = (body: unknown, auth = signedInAs(ADMIN), e: object = env) =>
   request(
     "/admin/ingest",
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
-    env,
+    e,
     auth,
   );
 
@@ -58,6 +60,18 @@ function latestCode(): string {
 function otherSession() {
   const auth = signedInAs(ADMIN);
   return { ...auth, session: { ...auth.session!, id: "other-session", token: "other-token" } };
+}
+
+/**
+ * 另一位管理員(不同使用者、不同信箱、不同 session)。重寄間隔以使用者計,
+ * 需要「同一時刻另有一組有效碼」的冷卻情境用這個,而不是同一使用者的 otherSession()。
+ */
+function otherAdmin() {
+  const auth = signedInAs(OTHER_ADMIN);
+  return {
+    user: { ...auth.user!, id: "other-user" },
+    session: { ...auth.session!, id: "other-admin-session", token: "other-admin-token", userId: "other-user" },
+  };
 }
 
 /** 一定不等於 code 的另一組 6 位數碼。 */
@@ -146,16 +160,20 @@ describe("POST /admin/ingest — 帶驗證碼觸發", () => {
     vi.mocked(runIngest).mockResolvedValue(okRun);
   });
 
-  it("正確碼 → 200 並執行抓取一次;同碼再用 → 422 challenge_invalid", async () => {
-    await requestChallenge();
+  it("正確碼 → 200 並執行抓取一次;同碼再用 → 冷卻中 429,冷卻後(碼未過期)422 challenge_invalid", async () => {
+    const short = { ...env, CHALLENGE_COOLDOWN_SECONDS: "60" };
+    await requestChallenge(signedInAs(ADMIN), short);
     const code = latestCode();
 
-    const first = await trigger({ code });
+    const first = await trigger({ code }, signedInAs(ADMIN), short);
     expect(first.status).toBe(200);
     expect(await first.json()).toEqual({ status: "ok", dataTime: "2026-10-22", dataCount: 1, fetched: 1, upserted: 1 });
     expect(runIngest).toHaveBeenCalledOnce();
 
-    const again = await trigger({ code });
+    expect((await trigger({ code }, signedInAs(ADMIN), short)).status).toBe(429);
+
+    vi.setSystemTime(new Date("2026-10-25T00:01:00Z"));
+    const again = await trigger({ code }, signedInAs(ADMIN), short);
     expect(again.status).toBe(422);
     expect(await again.json()).toEqual({ error: "challenge_invalid" });
     expect(runIngest).toHaveBeenCalledOnce();
@@ -337,5 +355,159 @@ describe("未登入/非管理員(guard 在前)", () => {
     expect(res.status).toBe(status);
     expect(await res.json()).toEqual({ error });
     expect(runIngest).not.toHaveBeenCalled();
+  });
+});
+
+describe("觸發冷卻:手動觸發開始後 10 分鐘內不能要求驗證碼、不能觸發", () => {
+  beforeEach(() => {
+    vi.mocked(runIngest).mockReset();
+    vi.mocked(runIngest).mockResolvedValue(okRun);
+  });
+
+  /** 00:00 要求驗證碼並觸發成功,冷卻到 00:10。 */
+  async function triggerOnce() {
+    await requestChallenge();
+    expect((await trigger({ code: latestCode() })).status).toBe(200);
+    inbox.clear();
+  }
+
+  it("冷卻中要求驗證碼 → 429 { error: cooldown, retryAfter } 帶 Retry-After,不寄信", async () => {
+    await triggerOnce();
+
+    vi.setSystemTime(new Date("2026-10-25T00:03:00Z"));
+    const res = await requestChallenge();
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("420");
+    expect(await res.json()).toEqual({ error: "cooldown", retryAfter: 420 });
+    expect(inbox.messages).toHaveLength(0);
+  });
+
+  it("冷卻開始前就要的有效碼,冷卻中使用 → 429 cooldown,不抓取、碼不被消耗", async () => {
+    // 另一位管理員先要一組碼(10 分鐘有效),本 session 接著觸發 → 冷卻開始
+    await requestChallenge(otherAdmin());
+    const early = latestCode();
+    await triggerOnce();
+
+    vi.setSystemTime(new Date("2026-10-25T00:09:59.500Z"));
+    const res = await trigger({ code: early }, otherAdmin());
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("1");
+    expect(await res.json()).toEqual({ error: "cooldown", retryAfter: 1 });
+    expect(runIngest).toHaveBeenCalledOnce();
+  });
+
+  it("被冷卻擋下的碼沒有被消耗:冷卻結束後(CHALLENGE_COOLDOWN_SECONDS 覆寫為 120)仍可觸發", async () => {
+    const short = { ...env, CHALLENGE_COOLDOWN_SECONDS: "120" };
+    await requestChallenge(otherAdmin(), short);
+    const early = latestCode();
+    await requestChallenge(signedInAs(ADMIN), short);
+    expect((await trigger({ code: latestCode() }, signedInAs(ADMIN), short)).status).toBe(200);
+
+    vi.setSystemTime(new Date("2026-10-25T00:01:00Z"));
+    const blocked = await trigger({ code: early }, otherAdmin(), short);
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toEqual({ error: "cooldown", retryAfter: 60 });
+
+    vi.setSystemTime(new Date("2026-10-25T00:02:00Z"));
+    expect((await trigger({ code: early }, otherAdmin(), short)).status).toBe(200);
+    expect(runIngest).toHaveBeenCalledTimes(2);
+  });
+
+  it("10 分鐘後恢復:可要求驗證碼、可觸發;到期前一刻仍在冷卻", async () => {
+    await triggerOnce();
+
+    vi.setSystemTime(new Date("2026-10-25T00:09:59.999Z"));
+    const last = await requestChallenge();
+    expect(last.status).toBe(429);
+    expect(await last.json()).toEqual({ error: "cooldown", retryAfter: 1 });
+
+    vi.setSystemTime(new Date("2026-10-25T00:10:00Z"));
+    expect((await requestChallenge()).status).toBe(202);
+    expect(inbox.messages).toHaveLength(1);
+    expect((await trigger({ code: latestCode() })).status).toBe(200);
+    expect(runIngest).toHaveBeenCalledTimes(2);
+  });
+
+  it("抓取失敗(500)也算進冷卻", async () => {
+    vi.mocked(runIngest).mockRejectedValueOnce(new Error("Anue HTTP 500"));
+    await requestChallenge();
+    expect((await trigger({ code: latestCode() })).status).toBe(500);
+
+    vi.setSystemTime(new Date("2026-10-25T00:00:30Z"));
+    const res = await requestChallenge();
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "cooldown", retryAfter: 570 });
+  });
+
+  it("冷卻是全域的:別的 session 也被擋", async () => {
+    await triggerOnce();
+    const res = await requestChallenge(otherSession());
+    expect(res.status).toBe(429);
+    expect(inbox.messages).toHaveLength(0);
+  });
+
+  describe("cron 不受冷卻限制,也不算進冷卻", () => {
+    /** 跑一次 cron,等 waitUntil 掛起的工作結束。 */
+    async function runCron() {
+      vi.spyOn(console, "log").mockImplementationOnce(() => {});
+      let pending: Promise<unknown> = Promise.resolve();
+      scheduled({} as ScheduledController, env as never, { waitUntil: (p: Promise<unknown>) => (pending = p) } as never);
+      await pending;
+    }
+
+    it("冷卻中 cron 照常執行抓取", async () => {
+      await triggerOnce();
+      await runCron();
+      expect(runIngest).toHaveBeenCalledTimes(2);
+    });
+
+    it("cron 剛跑完,手動要求驗證碼、觸發不被擋", async () => {
+      await runCron();
+      expect((await requestChallenge()).status).toBe(202);
+      expect((await trigger({ code: latestCode() })).status).toBe(200);
+    });
+
+    it("冷卻中跑 cron 不會延長冷卻:仍以手動觸發起算", async () => {
+      await triggerOnce();
+      vi.setSystemTime(new Date("2026-10-25T00:05:00Z"));
+      await runCron();
+      vi.setSystemTime(new Date("2026-10-25T00:10:00Z"));
+      expect((await requestChallenge()).status).toBe(202);
+    });
+  });
+
+  it("兩個 session 同時帶各自的有效碼觸發 → 恰好一個 200、另一個 429 cooldown 且碼不被消耗", async () => {
+    const short = { ...env, CHALLENGE_COOLDOWN_SECONDS: "60" };
+    await requestChallenge(otherAdmin(), short);
+    const otherCode = latestCode();
+    await requestChallenge(signedInAs(ADMIN), short);
+    const ownCode = latestCode();
+
+    const results = await Promise.all([
+      trigger({ code: ownCode }, signedInAs(ADMIN), short),
+      trigger({ code: otherCode }, otherAdmin(), short),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 429]);
+    const loser = results.find((r) => r.status === 429)!;
+    expect(await loser.json()).toEqual({ error: "cooldown", retryAfter: 60 });
+    expect(runIngest).toHaveBeenCalledOnce();
+
+    // 輸的那組碼沒被消耗:冷卻結束後仍可用
+    vi.setSystemTime(new Date("2026-10-25T00:01:00Z"));
+    const retry =
+      results[0].status === 429
+        ? await trigger({ code: ownCode }, signedInAs(ADMIN), short)
+        : await trigger({ code: otherCode }, otherAdmin(), short);
+    expect(retry.status).toBe(200);
+  });
+
+  it("冷卻中帶錯碼 → 429 cooldown(冷卻先於驗證碼檢查)", async () => {
+    await requestChallenge(otherAdmin());
+    const early = latestCode();
+    await triggerOnce();
+
+    const res = await trigger({ code: wrongCode(early) }, otherAdmin());
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "cooldown", retryAfter: 600 });
   });
 });

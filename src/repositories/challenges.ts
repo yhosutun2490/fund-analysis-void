@@ -1,5 +1,6 @@
 // admin_challenges（觸發驗證的驗證碼）的 DB 存取。規則（有效期、比對、次數）在 src/services/challenge.ts。
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, notExists, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { makeDb } from "../db/client";
 import { adminChallenges } from "../../db/schema";
 
@@ -42,15 +43,48 @@ export async function findActiveChallenge(
   return row ?? null;
 }
 
+/** 觸發冷卻的依據:該 purpose 最近一次被使用的驗證碼（不分使用者與 session）;從未使用過則 null。 */
+export async function findLatestUse(
+  db: D1Database,
+  { purpose }: { purpose: string },
+): Promise<{ id: string; usedAt: string } | null> {
+  const [row] = await makeDb(db)
+    .select({ id: adminChallenges.id, usedAt: adminChallenges.usedAt })
+    .from(adminChallenges)
+    .where(and(eq(adminChallenges.purpose, purpose), isNotNull(adminChallenges.usedAt)))
+    .orderBy(desc(adminChallenges.usedAt))
+    .limit(1);
+  return row?.usedAt ? { id: row.id, usedAt: row.usedAt } : null;
+}
+
 /**
  * 條件式標記已使用:只有使用時間仍為空（且未作廢）才更新。
+ * 觸發冷卻也併在同一個條件裡:同 purpose 在 cooldownSince 之後已有驗證碼被使用 → 不更新,
+ * 兩組不同的有效碼同時使用也只有一組能開始觸發（單一 UPDATE 敘述,D1 上是原子的）。
  * 回傳是否由這次呼叫標記成功（影響 1 列）;並發的兩個請求只有一個拿到 true。
  */
-export async function markChallengeUsed(db: D1Database, { id, now }: { id: string; now: string }): Promise<boolean> {
-  const result = await makeDb(db)
+export async function markChallengeUsed(
+  db: D1Database,
+  { id, now, cooldownSince }: { id: string; now: string; cooldownSince: string },
+): Promise<boolean> {
+  const drizzle = makeDb(db);
+  const recent = alias(adminChallenges, "recent");
+  const result = await drizzle
     .update(adminChallenges)
     .set({ usedAt: now })
-    .where(and(eq(adminChallenges.id, id), isNull(adminChallenges.usedAt), isNull(adminChallenges.revokedAt)))
+    .where(
+      and(
+        eq(adminChallenges.id, id),
+        isNull(adminChallenges.usedAt),
+        isNull(adminChallenges.revokedAt),
+        notExists(
+          drizzle
+            .select({ id: recent.id })
+            .from(recent)
+            .where(and(eq(recent.purpose, adminChallenges.purpose), gt(recent.usedAt, cooldownSince))),
+        ),
+      ),
+    )
     .run();
   return result.meta.changes === 1;
 }

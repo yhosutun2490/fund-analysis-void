@@ -102,13 +102,18 @@ describe("GET /openapi.json", () => {
     expect(sent.additionalProperties).toBe(false);
   });
 
-  it("POST /admin/ingest/challenge:429 resend_too_soon 帶 retryAfter 秒數", async () => {
-    const { responses } = (await openapi()).paths["/admin/ingest/challenge"].post;
-    const tooSoon = schemaOf(responses["429"]);
-    expect(tooSoon.properties.error.const).toBe("resend_too_soon");
-    expect(tooSoon.properties.retryAfter).toMatchObject({ type: "integer", exclusiveMinimum: 0 });
-    expect(tooSoon.required).toEqual(["error", "retryAfter"]);
-    expect(tooSoon.additionalProperties).toBe(false);
+  it.each([
+    ["/admin/ingest", ["cooldown"]],
+    ["/admin/ingest/challenge", ["cooldown", "resend_too_soon"]],
+  ])("POST %s:429 回 { error: %j 之一, retryAfter }", async (path, errors) => {
+    const schema = schemaOf((await openapi()).paths[path].post.responses["429"]);
+    const variants: Record<string, any>[] = schema.anyOf ?? [schema];
+    expect(variants.map((v) => v.properties.error.const)).toEqual(errors);
+    for (const v of variants) {
+      expect(v.properties.retryAfter).toMatchObject({ type: "integer", exclusiveMinimum: 0 });
+      expect(v.required).toEqual(["error", "retryAfter"]);
+      expect(v.additionalProperties).toBe(false);
+    }
   });
 
   it("POST /admin/ingest/challenge:502 寄信失敗回 { error: email_send_failed }", async () => {
@@ -119,14 +124,14 @@ describe("GET /openapi.json", () => {
     expect(failed.additionalProperties).toBe(false);
   });
 
-  it("POST /admin/ingest:requestBody 為 6 位數 code;列出 200/400/401/403/422/500", async () => {
+  it("POST /admin/ingest:requestBody 為 6 位數 code;列出 200/400/401/403/422/429/500", async () => {
     const op = (await openapi()).paths["/admin/ingest"].post;
     expect(op.requestBody!.required).toBe(true);
     const body = op.requestBody!.content["application/json"].schema;
     expect(body.required).toEqual(["code"]);
     expect(body.properties.code).toMatchObject({ type: "string", pattern: "^\\d{6}$" });
 
-    expect(Object.keys(op.responses)).toEqual(["200", "400", "401", "403", "422", "500"]);
+    expect(Object.keys(op.responses)).toEqual(["200", "400", "401", "403", "422", "429", "500"]);
     // 400:欄位驗證失敗,或 body 不是 JSON
     const bad = schemaOf(op.responses["400"]).anyOf.map((s: Record<string, any>) => s.properties.error.const);
     expect(bad).toEqual(["Validation failed", "Invalid JSON body"]);

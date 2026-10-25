@@ -2,7 +2,7 @@
 // GET /openapi.json 從這裡產生文件,兩者同源。文件端點本身（GET /、GET /openapi.json）不登錄。
 import { z } from "zod";
 import type { Endpoint } from "../lib/openapi";
-import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeInvalid, ChallengeSent } from "./admin";
+import { AdminIngestBody, AdminIngestError, AdminIngestOk, ChallengeCooldown, ChallengeInvalid, ChallengeSent } from "./admin";
 import { ChallengeSendFailed, CodeMismatch, ResendTooSoon } from "./admin";
 import {
   FundDetailResponse,
@@ -28,7 +28,7 @@ export const endpoints = {
       202: ChallengeSent,
       401: ErrorResponse,
       403: ErrorResponse,
-      429: ResendTooSoon,
+      429: z.union([ChallengeCooldown, ResendTooSoon]),
       502: ChallengeSendFailed,
     },
   },
@@ -44,6 +44,7 @@ export const endpoints = {
       401: ErrorResponse,
       403: ErrorResponse,
       422: z.union([CodeMismatch, ChallengeInvalid]),
+      429: ChallengeCooldown,
       500: AdminIngestError,
     },
   },
