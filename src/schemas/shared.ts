@@ -1,8 +1,10 @@
 // 多個端點共用的契約。資源專屬的請求/回應 schema 在同目錄下各資源的檔案。
 import { z } from "zod";
-import { DISCLAIMER } from "../disclaimer";
 
 /** 每個成功回應都帶的免責聲明（逐字固定）。 */
+export const DISCLAIMER =
+  "資料來源：鉅亨買基金（含理柏授權指標），僅供內部分析，非投資建議。夏普為月報酬口徑、未年化，勿與年化夏普混比。指標資料截至 as_of（月更）。";
+
 export const disclaimer = z.literal(DISCLAIMER);
 
 /** handler 自己回的錯誤（404/502）的一致形狀。 */

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chunkRanges, fetchTotalReturnSeries, spliceSegments } from "../src/anuePrice";
-import { AnueSchemaError } from "../src/anueSchema";
+import { chunkRanges, fetchTotalReturnSeries, spliceSegments } from "../src/anue/price";
+import { AnueSchemaError } from "../src/anue/schema";
 
 describe("chunkRanges — ≤3 年切塊、交界日共用", () => {
   it("6 年 → 2 段", () => {

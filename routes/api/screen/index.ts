@@ -1,11 +1,10 @@
 // GET /api/screen:快照初篩。範圍篩選決定回傳哪些基金;百分位永遠以完整 (category,currency) 組計算。
 import { defineHandler } from "void";
-import { DISCLAIMER } from "../../../src/disclaimer";
 import { listFullGroups, listMatchedKeys, type ScreenFilters } from "../../../src/repositories/funds";
 import { ScreenQuery, ScreenResponse } from "../../../src/schemas/screen";
-import { ValidationErrorResponse } from "../../../src/schemas/shared";
-import { screenGroups } from "../../../src/screen";
-import { responds } from "../../../src/validation";
+import { DISCLAIMER, ValidationErrorResponse } from "../../../src/schemas/shared";
+import { screenGroups } from "../../../src/domain/screen";
+import { responds } from "../../../src/lib/validation";
 
 export const GET = responds(
   { 200: ScreenResponse, 400: ValidationErrorResponse },

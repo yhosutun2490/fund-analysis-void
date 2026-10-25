@@ -14,7 +14,6 @@ vi.mock("../src/services/ingest", () => ({ runIngest: vi.fn() }));
 vi.mock("../src/services/recovery", async (orig) => ({ ...(await orig()), loadSeries: vi.fn() }));
 
 import { request } from "./entry";
-import { DISCLAIMER } from "../src/disclaimer";
 import {
   getFund, getLatestRisk, getRiskHistory, listCategories, listFullGroups, listFunds, listMatchedKeys,
 } from "../src/repositories/funds";
@@ -24,9 +23,9 @@ import { FundDetailResponse, FundHistoryResponse, FundListResponse, RecoveryResp
 import { CategoriesResponse, RunsResponse } from "../src/schemas/meta";
 import { RootResponse } from "../src/schemas/root";
 import { ScreenResponse } from "../src/schemas/screen";
-import { ErrorResponse, ValidationErrorResponse } from "../src/schemas/shared";
-import type { SeriesPoint } from "../src/recovery";
-import type { ScreenRow } from "../src/screen";
+import { DISCLAIMER, ErrorResponse, ValidationErrorResponse } from "../src/schemas/shared";
+import type { SeriesPoint } from "../src/domain/recovery";
+import type { ScreenRow } from "../src/domain/screen";
 import { runIngest } from "../src/services/ingest";
 import { loadSeries } from "../src/services/recovery";
 

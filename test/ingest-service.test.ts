@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/anue", () => ({
+vi.mock("../src/anue/search", () => ({
   fetchAllFunds: vi.fn(),
   normalize: vi.fn(),
   fetchInvestmentAreaMap: vi.fn(),
@@ -11,8 +11,8 @@ vi.mock("../src/repositories/ingest", () => ({
   recordRun: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { fetchAllFunds, fetchInvestmentAreaMap } from "../src/anue";
-import { AnueSchemaError } from "../src/anueSchema";
+import { fetchAllFunds, fetchInvestmentAreaMap } from "../src/anue/search";
+import { AnueSchemaError } from "../src/anue/schema";
 import { recordRun, updateInvestmentAreas } from "../src/repositories/ingest";
 import { runIngest } from "../src/services/ingest";
 

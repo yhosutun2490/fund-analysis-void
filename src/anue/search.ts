@@ -2,8 +2,8 @@
 // 合約細節見 docs/research/2026-10-10-anue-fund-search-api.md
 
 import { z } from "zod";
-import * as KNOWN from "./anueKnownKeys";
-import { AnueEnvelope, AnueSchemaError, parseAnue, parseAnueResponse, unknownKeysWarning, withKnownKeys } from "./anueSchema";
+import * as KNOWN from "./knownKeys";
+import { AnueEnvelope, AnueSchemaError, parseAnue, parseAnueResponse, unknownKeysWarning, withKnownKeys } from "./schema";
 
 const ANUE_URL = "https://www.anuefund.com/anuefundApi/Search/Detail";
 const NA = -99999999.9999; // 哨兵值 = 無資料

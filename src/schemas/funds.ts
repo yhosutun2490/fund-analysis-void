@@ -78,7 +78,7 @@ export const FundHistoryResponse = z.strictObject({
   disclaimer,
 });
 
-// GET /api/funds/:id/recovery（純計算,見 src/recovery.ts）。日期欄位皆為 YYYY-MM-DD 字串。
+// GET /api/funds/:id/recovery（純計算,見 src/domain/recovery.ts）。日期欄位皆為 YYYY-MM-DD 字串。
 
 const Drawdown = z.strictObject({
   depth: z.number().nullable(),

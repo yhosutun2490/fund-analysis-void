@@ -1,10 +1,9 @@
 // GET /api/funds:基金清單 + 篩選 + 排序（以最新快照）。
 import { defineHandler } from "void";
-import { DISCLAIMER } from "../../../src/disclaimer";
 import { listFunds } from "../../../src/repositories/funds";
 import { FundListQuery, FundListResponse } from "../../../src/schemas/funds";
-import { ValidationErrorResponse } from "../../../src/schemas/shared";
-import { responds } from "../../../src/validation";
+import { DISCLAIMER, ValidationErrorResponse } from "../../../src/schemas/shared";
+import { responds } from "../../../src/lib/validation";
 
 export const GET = responds(
   { 200: FundListResponse, 400: ValidationErrorResponse },

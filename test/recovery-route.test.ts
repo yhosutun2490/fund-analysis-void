@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/anuePrice", () => ({ fetchTotalReturnSeries: vi.fn() }));
+vi.mock("../src/anue/price", () => ({ fetchTotalReturnSeries: vi.fn() }));
 vi.mock("../src/repositories/series", () => ({
   getSeries: vi.fn(),
   saveSeries: vi.fn().mockResolvedValue(undefined),
@@ -11,8 +11,8 @@ vi.mock("../src/repositories/funds", () => ({
 }));
 
 import { request } from "./entry";
-import { AnueSchemaError } from "../src/anueSchema";
-import { fetchTotalReturnSeries } from "../src/anuePrice";
+import { AnueSchemaError } from "../src/anue/schema";
+import { fetchTotalReturnSeries } from "../src/anue/price";
 import { getFund, getLatestRisk } from "../src/repositories/funds";
 import { getSeries, saveSeries } from "../src/repositories/series";
 import { ValidationErrorResponse } from "../src/schemas/shared";

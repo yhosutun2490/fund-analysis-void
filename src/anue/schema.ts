@@ -1,7 +1,7 @@
 // 鉅亨回應的 zod 驗證共用件。schema 只釘「結構與型別」;哨兵/null 的領域清理仍歸 normalize。
 // 偵測靈敏度：已知欄位被移除/改型別/在必填處變 null → 硬失敗;多出未知欄位 → 只回報（不 .strict()）。
 import { z } from "zod";
-import { describeIssues } from "./zodIssues";
+import { describeIssues } from "../lib/zodIssues";
 
 /** 鉅亨回應格式不符（契約變動）。與 HTTP / succ:false 等可用性錯誤分開,呼叫端據此分流。 */
 export class AnueSchemaError extends Error {

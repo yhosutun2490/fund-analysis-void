@@ -18,16 +18,16 @@ POST /admin/ingest ─┴─▶ fetchAllFunds() ─▶ normalize(哨兵值→nul
    前端 / 你 ───▶ GET /api/*      ◀───────────────────────────────────┘
 ```
 
-- `src/anue.ts`：抓取 + 正規化（`pageSize` 2000、3 頁抓完 4540 檔；`-99999999.9999` → null）
-- `src/db/schema.ts`：**D1 schema 唯一真相來源（Drizzle）**；型別與 migration 都從它衍生
+- `src/anue/search.ts`：抓取 + 正規化（`pageSize` 2000、3 頁抓完 4540 檔；`-99999999.9999` → null）
+- `db/schema.ts`：**D1 schema 唯一真相來源（Drizzle）**；型別與 migration 都從它衍生
 - `src/db/client.ts`：`makeDb(env.DB)` 建立帶 schema 的 drizzle 實例
 - `src/repositories/*`：以 Drizzle 查詢（`funds` 覆蓋更新、`fund_risk` 以 `(fund_id, as_of)` 累積月快照）
-- `src/screen.ts`：快照初篩純計算（同組百分位、年度勝率、入選規則；描述性，非建議）
-- `src/anuePrice.ts`：鉅亨含息序列抓取（切塊、併發、串接）；`src/recovery.ts`：回撤／近期報酬純計算
+- `src/domain/screen.ts`：快照初篩純計算（同組百分位、年度勝率、入選規則；描述性，非建議）
+- `src/anue/price.ts`：鉅亨含息序列抓取（切塊、併發、串接）；`src/domain/recovery.ts`：回撤／近期報酬純計算
 - `src/services/recovery.ts`：序列快取新鮮度 → 抓取／存檔 → 計算；`src/repositories/series.ts`：`fund_series` 讀寫
 - `routes/`：Void 檔案路由，一個 URL 一個檔（每個 HTTP 方法一個具名 export）；`middleware/01.cors.ts`：`/api/*` 的 CORS
-- `crons/daily-ingest.ts`：每日 cron 排程（呼叫 `src/triggers/scheduled.ts`）
-- `drizzle/`：`drizzle-kit generate` 產生的 migration（由 schema.ts 衍生,勿手改）
+- `crons/daily-ingest.ts`：每日 cron 排程（與 `/admin/ingest` 共用 `runIngest`;失敗或帶 warning 時通知 Discord）
+- `db/migrations/`：`drizzle-kit generate` 產生的 migration（由 schema.ts 衍生,勿手改）
 
 ## 設定與啟動
 
@@ -57,8 +57,8 @@ npm run deploy
 ### 驗證
 
 - **請求**：各路由檔以 `defineHandler.withValidator()` 套 `src/schemas/*` 的 query/param schema，不合法 → `400 { error: "Validation failed", issues: [{ slot, issues: [{ message, path }] }] }`（`message` 為 zh-TW 用語）。
-- **回應**：各路由成功回應由 `responds()`（`src/validation.ts`）對 `src/schemas/*` 的 schema 驗證（DB 列由 Drizzle 衍生）。`vite dev` / 測試中不符即 500（大聲失敗）;正式建置（`import.meta.env.PROD`）只記 log、照常回傳。
-- **上游鉅亨**：回應以 zod 驗證。破壞性變動 → 抓取失敗、`ingest_runs` 記 `status:error`;多出未知欄位 → 記 warning（`src/anueKnownKeys.ts` 為已知欄位快照,確認無害後補進清單即可）。
+- **回應**：各路由成功回應由 `responds()`（`src/lib/validation.ts`）對 `src/schemas/*` 的 schema 驗證（DB 列由 Drizzle 衍生）。`vite dev` / 測試中不符即 500（大聲失敗）;正式建置（`import.meta.env.PROD`）只記 log、照常回傳。
+- **上游鉅亨**：回應以 zod 驗證。破壞性變動 → 抓取失敗、`ingest_runs` 記 `status:error`;多出未知欄位 → 記 warning（`src/anue/knownKeys.ts` 為已知欄位快照,確認無害後補進清單即可）。
 
 ## 端點
 

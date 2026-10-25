@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { makeDb } from "../db/client";
-import { fundSeries } from "../db/schema";
-import type { SeriesPoint } from "../recovery";
+import { fundSeries } from "../../db/schema";
+import type { SeriesPoint } from "../domain/recovery";
 
 export interface SeriesRow {
   fund_id: string;
