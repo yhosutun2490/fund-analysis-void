@@ -1,8 +1,8 @@
 import { type AnyColumn, and, asc, count, desc, eq, gte, inArray, lte, max, type SQL, sql } from "drizzle-orm";
 import { makeDb } from "../db/client";
-import { fundRisk, funds, fundSeries } from "../db/schema";
+import { fundRisk, funds, fundSeries } from "../../db/schema";
 import { categoryCols, fundCols, fundListCols, riskCols } from "../db/selections";
-import type { ScreenRow } from "../screen";
+import type { ScreenRow } from "../domain/screen";
 
 export interface FundListQuery {
   group?: string;

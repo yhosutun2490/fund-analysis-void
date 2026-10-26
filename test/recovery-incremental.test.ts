@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/anuePrice", () => ({ fetchTotalReturnSeries: vi.fn() }));
+vi.mock("../src/anue/price", () => ({ fetchTotalReturnSeries: vi.fn() }));
 vi.mock("../src/repositories/series", () => ({
   getSeries: vi.fn(),
   saveSeries: vi.fn().mockResolvedValue(undefined),
@@ -9,7 +9,7 @@ vi.mock("../src/repositories/funds", () => ({
   getLatestRisk: vi.fn().mockResolvedValue({ nav_date: "2026-10-09" }), // 讓快取不新鮮
 }));
 
-import { fetchTotalReturnSeries } from "../src/anuePrice";
+import { fetchTotalReturnSeries } from "../src/anue/price";
 import { getLatestRisk } from "../src/repositories/funds";
 import { getSeries, saveSeries } from "../src/repositories/series";
 import { loadSeries } from "../src/services/recovery";

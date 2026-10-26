@@ -1,12 +1,15 @@
 node_modules/
 .wrangler/
 .dev.vars
+# 本機 secret(ADMIN_EMAILS 等);Void 本機只讀 .env
+.env
 dist/
 *.log
 .DS_Store
 
 # docs 為本機參考,不入庫
-docs/
+docs/*
+!docs/agents/
 
 # .scratch 為本機暫存,不入庫
 .scratch/

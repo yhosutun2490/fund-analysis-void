@@ -1,0 +1,143 @@
+/// <reference types="vite/client" />
+import { type Context, Hono, type MiddlewareHandler } from "hono";
+import type { AuthSession, AuthState, AuthUser } from "void/auth";
+import { convertReturnValue } from "void/response";
+import type { Env } from "../src/bindings";
+
+/**
+ * 測試用路由入口:Void 沒有提供測試用的 app 建構器,這裡用 import.meta.glob
+ * 讀進 routes/ 底下的路由檔,依 Void 的檔名規則轉成路徑掛到一個 Hono 實例上。
+ *
+ * 規則對照 Void 的 router(node_modules/void 的 parseRouteFilename / compareRouteSpecificity):
+ * - `index` → 所在目錄;`[x]` → `:x`;`(group)` 目錄不進路徑
+ * - 任一段以 `_` 開頭的檔案不是路由
+ * - 同一段靜態優先於動態
+ *
+ * 已知限制:比對順序由這裡自己實作,不是 Void 實際的 router。只要沒有 catch-all 跟動態段競爭就不會有差異,
+ * 所以不支援 catch-all(`[...x]`)路由檔:遇到就直接報錯,要用時再照 Void 的 compareRouteSpecificity 補上。
+ *
+ * 也沒有掛 Void 的 auth middleware 與 /api/auth/*:改由 stub middleware(排在所有使用者 middleware 之前,
+ * 與 Void 產生的入口同序)把該次請求指定的 user/session 放進 context,見 `request()` 的 `auth` 參數。
+ */
+
+const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] as const;
+type Method = (typeof METHODS)[number];
+type TestEnv = { Bindings: Env; Variables: { user: AuthUser | null; session: AuthSession | null } };
+type RouteHandler = (c: Context<TestEnv>) => unknown;
+export type RouteModule = Partial<Record<Method, RouteHandler>>;
+export type MiddlewareModule = { default: MiddlewareHandler<TestEnv> };
+
+interface Route {
+  pattern: string;
+  module: RouteModule;
+}
+
+/** glob key(如 `../routes/api/funds/[id].ts`)→ 路由;不是路由檔則回 null。 */
+function toRoute(key: string, module: RouteModule): Route | null {
+  const rel = key.replace(/^.*?\/routes\//, "").replace(/\.(ts|mts|js|mjs)$/, "");
+  const segments = rel.split("/");
+  if (segments.some((s) => s.startsWith("_"))) return null;
+  if (segments[segments.length - 1] === "index") segments.pop();
+  const parts = segments
+    .filter((s) => !(s.startsWith("(") && s.endsWith(")")))
+    .map((s) => {
+      if (s.startsWith("[...")) throw new Error(`測試入口不支援 catch-all 路由檔:${key}`);
+      if (s.startsWith("[") && s.endsWith("]")) return `:${s.slice(1, -1)}`;
+      return s;
+    });
+  return { pattern: "/" + parts.join("/"), module };
+}
+
+function bySpecificity(a: Route, b: Route): number {
+  const as = a.pattern.split("/");
+  const bs = b.pattern.split("/");
+  for (let i = 0; i < Math.min(as.length, bs.length); i++) {
+    const aDyn = as[i].startsWith(":");
+    const bDyn = bs[i].startsWith(":");
+    if (aDyn !== bDyn) return aDyn ? 1 : -1;
+    if (as[i] !== bs[i]) return as[i].localeCompare(bs[i]);
+  }
+  return as.length - bs.length;
+}
+
+/** middleware 檔名的數字前綴決定順序(`01.cors.ts`);沒有前綴排最後。 */
+const middlewareOrder = (key: string) => {
+  const match = key.split("/").pop()!.match(/^(\d+)\./);
+  return match ? parseInt(match[1], 10) : Infinity;
+};
+
+/** glob 結果 → 依比對優先順序排好的路由表。 */
+const routeTable = (routes: Record<string, RouteModule>) =>
+  Object.entries(routes)
+    .map(([key, module]) => toRoute(key, module))
+    .filter((r): r is Route => r !== null)
+    .sort(bySpecificity);
+
+/** 路由檔(glob 結果)實際提供的端點,形如 `GET /api/funds/:id`。 */
+export const routeEndpoints = (routes: Record<string, RouteModule>) =>
+  routeTable(routes).flatMap(({ pattern, module }) => METHODS.filter((m) => module[m]).map((m) => `${m} ${pattern}`));
+
+/** 每個請求指定的登入狀態;沒登記的請求視為未登入。以 Request 為 key,不跨請求殘留。 */
+const authByRequest = new WeakMap<Request, AuthState>();
+
+/** 模擬 Void auth middleware 的產出:未登入時 user/session 皆為 null。 */
+const authStub: MiddlewareHandler<TestEnv> = async (c, next) => {
+  const state = authByRequest.get(c.req.raw);
+  c.set("user", state?.user ?? null);
+  c.set("session", state?.session ?? null);
+  await next();
+};
+
+/** 依 Void 檔名規則把路由表與全域 middleware(皆為 glob 結果)掛成一個 Hono app。 */
+export function createEntry(
+  routes: Record<string, RouteModule>,
+  middleware: Record<string, MiddlewareModule> = {},
+) {
+  const app = new Hono<TestEnv>();
+  app.use(authStub);
+  Object.entries(middleware)
+    .filter(([key]) => !key.replace(/^.*?\/middleware\//, "").startsWith("_"))
+    .sort(([a], [b]) => middlewareOrder(a) - middlewareOrder(b))
+    .forEach(([, mod]) => app.use(mod.default));
+  for (const { pattern, module } of routeTable(routes)) {
+    for (const method of METHODS) {
+      const handler = module[method];
+      if (handler) app.on(method, pattern, async (c) => convertReturnValue(await handler(c)));
+    }
+  }
+  return app;
+}
+
+const entry = createEntry(
+  import.meta.glob<RouteModule>("../routes/**/*.ts", { eager: true }),
+  import.meta.glob<MiddlewareModule>("../middleware/**/*.ts", { eager: true }),
+);
+
+// 路由檔可能用 c.executionCtx(例如 waitUntil);測試環境沒有 Worker,給一個空殼。
+const executionCtx = {
+  waitUntil: () => {},
+  passThroughOnException: () => {},
+  props: {},
+} as unknown as ExecutionContext;
+
+/** 測試用的登入狀態:以該 email 登入的使用者與其 session(欄位值無意義,只有 email 會被讀)。 */
+export function signedInAs(email: string): AuthState {
+  const now = new Date("2026-01-01T00:00:00Z");
+  return {
+    user: { id: "test-user", email, emailVerified: false, name: "test", createdAt: now, updatedAt: now },
+    session: {
+      id: "test-session", token: "test-token", userId: "test-user",
+      expiresAt: new Date("2099-01-01T00:00:00Z"), createdAt: now, updatedAt: now,
+    },
+  };
+}
+
+/**
+ * 對整個 app(路由檔 + 全域 middleware)送出請求。
+ * `auth`:本次請求的登入狀態(通常用 `signedInAs(email)`);省略即未登入。
+ */
+export const request = (path: string, init?: RequestInit, env?: Partial<Env>, auth?: AuthState) => {
+  const req = new Request(new URL(path, "http://localhost"), init);
+  if (auth) authByRequest.set(req, auth);
+  return entry.request(req, undefined, env, executionCtx);
+};

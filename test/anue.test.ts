@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type AnueRow, fetchAllFunds, normalize } from "../src/anue";
+import { type AnueRow, fetchAllFunds, normalize } from "../src/anue/search";
 
 const NA = -99999999.9999;
 
